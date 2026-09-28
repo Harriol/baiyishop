@@ -1,0 +1,16 @@
+package com.harriol.baiyishop.user;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+/**
+ * 用户服务：账号密码与微信认证、用户资料、收货地址、管理员与 RBAC（REQ-101~106）。
+ * <p>模块与端口划分见 docs/architecture.md 2.2。
+ */
+@SpringBootApplication
+public class UserApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(UserApplication.class, args);
+    }
+}

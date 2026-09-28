@@ -1,0 +1,25 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: baiyishop-search
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+# 统一日志格式：时间 | 级别 | 服务名 | 线程 | traceId | 类 | 消息（REQ-1003、NFR-04）
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${spring.application.name:}] [%thread] [%X{traceId:-}] %logger{36} - %msg%n"
+  level:
+    root: info

@@ -1,34 +1,35 @@
 plugins {
-    java
-    id("org.springframework.boot") version "4.1.1"
-    id("io.spring.dependency-management") version "1.1.7"
+    alias(libs.plugins.spring.boot) apply false
+    alias(libs.plugins.spring.dependency.management) apply false
 }
 
-group = "com.harriol"
-version = "0.0.1-SNAPSHOT"
-description = "baiyishop"
+allprojects {
+    group = "com.harriol.baiyishop"
+    version = "0.0.1-SNAPSHOT"
+}
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+// 所有子模块共用的编译与测试约定（业务模块在各自 build 文件中再应用 Spring Boot 插件）
+subprojects {
+    apply(plugin = "java")
+
+    extensions.configure<JavaPluginExtension> {
+        toolchain { languageVersion = JavaLanguageVersion.of(21) }
     }
-}
 
-repositories {
-    mavenCentral()
-}
+    tasks.withType<JavaCompile>().configureEach {
+        options.encoding = "UTF-8"
+        options.compilerArgs.add("-parameters")
+    }
 
-dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-webmvc")
-    compileOnly("org.projectlombok:lombok")
-    runtimeOnly("com.mysql:mysql-connector-j")
-    annotationProcessor("org.projectlombok:lombok")
-    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
-    testCompileOnly("org.projectlombok:lombok")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testAnnotationProcessor("org.projectlombok:lombok")
-}
+    tasks.withType<Test>().configureEach {
+        useJUnitPlatform()
+    }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+    dependencies {
+        // 所有模块统一用 Spring Boot BOM 管理版本（版本号来自 libs.versions.toml）
+        add("annotationProcessor", rootProject.libs.lombok)
+        add("compileOnly", rootProject.libs.lombok)
+        add("testAnnotationProcessor", rootProject.libs.lombok)
+        add("testCompileOnly", rootProject.libs.lombok)
+    }
 }
