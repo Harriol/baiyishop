@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品详情 · 百益商城小程序</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/mini.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/mini-shell.js"></script>
+<script>
+var pid = Number(qs("id", 1001));
+var p = P(pid) || DB.products[0];
+var chain = catPath(p.categoryId);
+var soldOut = p.stock <= 0;
+var bar = "<div class=\"m-bar\">"
+  + "<a class=\"m-btn plain\" href=\"index.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"house\" data-size=\"17\"></i><span style=\"font-size:10px\">首页</span></a>"
+  + "<a class=\"m-btn plain\" href=\"cart.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"shopping-cart\" data-size=\"17\"></i><span style=\"font-size:10px\">购物车</span></a>"
+  + "<button class=\"m-btn plain grow\" id=\"addCart\" " + (soldOut ? "disabled" : "") + ">加入购物车</button>"
+  + "<button class=\"m-btn price grow\" id=\"buy\" " + (soldOut ? "disabled" : "") + ">" + (soldOut ? "已售罄" : "立即购买") + "</button></div>";
+var body = miniShell({ title: "商品详情", back: "index.html", tabs: false, bar: bar });
+body.innerHTML =
+  "<div class=\"m-gallery\"><div class=\"main\"><img src=\"" + img(p.image) + "\" alt=\"\"></div>"
+  + "<div class=\"dots\"><i class=\"on\"></i><i></i><i></i></div></div>"
+  + "<div style=\"background:var(--surface);padding:12px\">"
+  + "<div class=\"row g6 wrap\"><span class=\"m-tag price\">" + (p.tags[0] || "自营") + "</span><span class=\"m-tag brand\">全场包邮</span><span class=\"m-tag\">7 天无理由</span></div>"
+  + "<div style=\"font-size:16px;font-weight:600;line-height:1.5;margin-top:8px\">" + p.name + "</div>"
+  + "<div class=\"row g8 mt8\"><span style=\"color:var(--price);font-size:22px;font-weight:700\">" + yuanPlain(p.price) + "</span>"
+  + "<span class=\"price-origin small\">" + yuanPlain(p.originPrice) + "</span>"
+  + "<span class=\"small faint\" style=\"margin-left:auto\">已售 " + p.sales + "</span></div></div>"
+  + "<div class=\"m-list mt12\" style=\"border-radius:0\">"
+  + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">规格</span><span class=\"m-tag brand\">默认规格</span><span class=\"small faint\" style=\"margin-left:auto\">库存 " + p.stock + "</span></div>"
+  + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">服务</span><span class=\"small\">正品保障 · 48 小时发货 · 全场包邮</span></div></div>"
+  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品参数</h3></div><div class=\"m-list\">"
+  + Object.keys(p.params).map(function (k) {
+      return "<div class=\"m-row\"><span class=\"small faint\" style=\"width:64px\">" + k + "</span><span class=\"small\">" + p.params[k] + "</span></div>";
+    }).join("") + "</div></div>"
+  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品详情</h3></div>"
+  + "<img src=\"" + img(p.image) + "\" alt=\"\" style=\"width:100%;border-radius:8px\">"
+  + "<p class=\"small muted mt8\" style=\"line-height:1.8\">本商品由百益商城自营，正品保障。下单后 48 小时内发货，发货后 7 天未确认将自动确认收货；未支付订单 15 分钟自动取消。</p></div>"
+  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>同类推荐</h3></div><div class=\"m-grid\">"
+  + relatedList(p).slice(0, 4).map(function (x) {
+      return "<a class=\"m-card\" href=\"product.html?id=" + x.id + "\"><div class=\"ph\"><img src=\"" + img(x.image) + "\" alt=\"\"></div>"
+        + "<div class=\"in\"><div class=\"nm\">" + x.name + "</div><div class=\"pr\">" + yuanPlain(x.price) + "</div></div></a>";
+    }).join("") + "</div></div><div style=\"height:12px\"></div>";
+function relatedList(x) {
+  var ch = catPath(x.categoryId);
+  for (var i = ch.length - 1; i >= 0; i--) {
+    var ids = catIds(ch[i].id);
+    var list = DB.products.filter(function (y) { return y.status === "ON_SALE" && y.id !== x.id && ids.indexOf(y.categoryId) >= 0; })
+      .sort(function (a, b) { return b.sales - a.sales; });
+    if (list.length >= 4 || i === 0) return list;
+  }
+  return [];
+}
+document.getElementById("addCart").onclick = function () { toast("已加入购物车", "ok"); };
+document.getElementById("buy").onclick = function () { location.href = "../checkout.html?source=BUY_NOW&id=" + p.id + "&qty=1"; };
+mountMiniIcons(body);
+</script>
+</body>
+</html>

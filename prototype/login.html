@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container" style="max-width:420px">
+<div class="card mt24">
+  <div class="center" style="flex-direction:column;gap:6px;padding:6px 0 16px">
+    <div class="logo-mark" style="width:40px;height:40px;font-size:20px;border-radius:8px">益</div>
+    <h2 style="font-size:17px">欢迎来到百益商城</h2>
+    <p class="small faint">登录后即可加购、下单与参与秒杀</p>
+  </div>
+  <div class="tabs" id="tabs"><button data-value="login" class="on">登录</button><button data-value="register">注册</button></div>
+  <form id="form" class="mt16" style="display:grid;gap:12px" novalidate>
+    <div class="field"><label>账号</label><input class="input" id="u" placeholder="请输入账号" autocomplete="username"></div>
+    <div class="field" id="nickWrap" style="display:none"><label>昵称</label><input class="input" id="nick" placeholder="选填"></div>
+    <div class="field"><label>密码</label>
+      <div style="position:relative"><input class="input" id="p" type="password" placeholder="请输入密码" autocomplete="current-password" style="padding-right:38px">
+        <button type="button" class="btn btn-ghost btn-sm" id="eye" style="position:absolute;right:4px;top:4px" aria-label="显示密码"><i data-icon="eye" data-size="16"></i></button></div></div>
+    <div class="field" id="p2Wrap" style="display:none"><label>确认密码</label><input class="input" id="p2" type="password" placeholder="请再次输入密码"></div>
+    <div class="between"><label class="check"><input type="checkbox" id="remember" checked><span class="small">记住账号</span></label>
+      <a class="small" style="color:var(--brand)" href="#" id="forgot">忘记密码？</a></div>
+    <button class="btn btn-primary btn-lg btn-block" type="submit" id="submit">登录</button>
+  </form>
+  <div class="row g12 mt16" style="align-items:center"><span style="flex:1;height:1px;background:var(--line)"></span><span class="small faint">其他方式</span><span style="flex:1;height:1px;background:var(--line)"></span></div>
+  <button class="btn btn-block mt12" id="wechat"><i data-icon="message-circle" data-size="17" style="color:#0f7b6c"></i>微信授权登录（小程序端）</button>
+  <p class="small faint mt12" style="text-align:center">登录失败 5 次将锁定账号 10 分钟；游客可浏览与搜索，但下单需要登录</p>
+</div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("category");
+var mode = "login";
+document.querySelectorAll("#tabs button").forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on"); mode = b.dataset.value;
+    document.getElementById("nickWrap").style.display = mode === "register" ? "" : "none";
+    document.getElementById("p2Wrap").style.display = mode === "register" ? "" : "none";
+    document.getElementById("submit").textContent = mode === "register" ? "注册并登录" : "登录";
+  };
+});
+document.getElementById("eye").onclick = function () {
+  var p = document.getElementById("p");
+  p.type = p.type === "password" ? "text" : "password";
+};
+document.getElementById("forgot").onclick = function (e) { e.preventDefault(); toast("原型不做找回密码流程"); };
+document.getElementById("wechat").onclick = function () { toast("微信授权登录用于小程序端，Web 端请使用账号密码"); };
+document.getElementById("form").onsubmit = function (e) {
+  e.preventDefault();
+  var u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
+  if (!u) { toast("请输入账号", "err"); return; }
+  if (p.length < 6) { toast("密码至少 6 位", "err"); return; }
+  if (mode === "register") {
+    if (p !== document.getElementById("p2").value) { toast("两次输入的密码不一致", "err"); return; }
+    toast("注册成功，正在登录…", "ok");
+  } else { toast("登录成功", "ok"); }
+  setTimeout(function () { location.href = "index.html"; }, 700);
+};
+mountIcons(document);
+</script>
+</body>
+</html>

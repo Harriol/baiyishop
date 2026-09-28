@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的 · 百益商城小程序</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/mini.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/mini-shell.js"></script>
+<script>
+var body = miniShell({ tab: "profile", title: "我的" });
+var u = DB.user;
+function cnt(s) { return DB.orders.filter(function (o) { return o.status === s; }).length; }
+body.innerHTML =
+  "<div style=\"background:linear-gradient(135deg,#0f7b6c,#12a08c);padding:18px 16px 26px;color:#fff\">"
+  + "<div class=\"row g12\">"
+  + "<div style=\"width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700\">" + u.avatarText + "</div>"
+  + "<div><div style=\"font-size:17px;font-weight:600\">" + u.nickname + "</div>"
+  + "<div style=\"font-size:12px;opacity:.85;margin-top:2px\">微信授权登录 · " + u.phone.slice(0, 3) + "****" + u.phone.slice(7) + "</div></div>"
+  + "<span class=\"m-tag\" style=\"margin-left:auto;background:rgba(255,255,255,.2);color:#fff\">" + u.memberLevel + "</span></div></div>"
+  + "<div style=\"background:var(--surface);border-radius:12px;margin:-14px 12px 0;position:relative;padding:12px 6px\">"
+  + "<div class=\"row\" style=\"padding:0 6px 10px\"><span class=\"small\" style=\"font-weight:600\">我的订单</span>"
+  + "<a class=\"small faint\" style=\"margin-left:auto\" href=\"orders.html\">全部订单 ></a></div>"
+  + "<div style=\"display:grid;grid-template-columns:repeat(4,1fr);text-align:center\">"
+  + [["PENDING_PAYMENT", "待付款", "credit-card"], ["PENDING_SHIPMENT", "待发货", "package"], ["PENDING_RECEIPT", "待收货", "truck"], ["COMPLETED", "已完成", "circle-check"]].map(function (t) {
+      return "<a href=\"orders.html?status=" + t[0] + "\" style=\"position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-2)\">"
+        + "<i data-icon=\"" + t[2] + "\" data-size=\"21\" style=\"color:var(--brand)\"></i>" + t[1]
+        + (cnt(t[0]) ? "<span style=\"position:absolute;top:-4px;right:14px;min-width:15px;height:15px;border-radius:8px;background:var(--price);color:#fff;font-size:10px;line-height:15px\">" + cnt(t[0]) + "</span>" : "")
+        + "</a>";
+    }).join("") + "</div></div>"
+  + "<div class=\"m-list\" style=\"margin:12px\">"
+  + [["map-pin", "收货地址", "../address.html", DB.addresses.length + " 个"],
+     ["ticket-percent", "我的秒杀", "../seckill.html", ""],
+     ["shopping-cart", "购物车", "cart.html", ""],
+     ["store", "前台商城（Web）", "../index.html", ""]].map(function (m) {
+      return "<a class=\"m-row\" href=\"" + m[2] + "\"><i data-icon=\"" + m[0] + "\" data-size=\"18\" style=\"color:var(--brand)\"></i>"
+        + "<span class=\"grow small\">" + m[1] + "</span><span class=\"small faint\">" + m[3] + "</span>"
+        + "<i data-icon=\"chevron-right\" data-size=\"15\" style=\"color:var(--ink-3)\"></i></a>";
+    }).join("") + "</div>"
+  + "<div style=\"padding:0 12px 16px\"><button class=\"m-btn plain full\" id=\"out\">退出登录</button></div>"
+  + "<div class=\"small faint\" style=\"text-align:center;padding-bottom:16px\">小程序端与 Web 端共用同一套后端接口</div>";
+document.getElementById("out").onclick = function () { toast("已退出登录（小程序端为微信授权登录）"); };
+mountMiniIcons(body);
+</script>
+</body>
+</html>

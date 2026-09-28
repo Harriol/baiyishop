@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>个人中心 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container" style="max-width:860px">
+<div class="card mt16">
+  <div class="row g16" style="flex-wrap:wrap">
+    <div style="width:64px;height:64px;border-radius:50%;background:var(--brand-tint);color:var(--brand-dark);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700" id="avatar"></div>
+    <div class="grow"><div class="row g8"><h2 id="nick"></h2><span class="tag tag-brand" id="level"></span></div>
+      <div class="small muted mt8" id="phone"></div>
+      <div class="small faint mt8">账号 ID <span id="uid"></span></div></div>
+    <button class="btn" id="edit" style="align-self:flex-start"><i data-icon="pencil" data-size="15"></i>编辑资料</button>
+  </div>
+</div>
+<div class="card mt12" style="padding:0">
+  <a class="order-line" href="orders.html?status=PENDING_PAYMENT" style="align-items:center">
+    <i data-icon="credit-card" data-size="18" style="color:var(--price)"></i><span class="grow">待付款</span>
+    <span class="pill pill-pay" id="c-pay"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+  <a class="order-line" href="orders.html?status=PENDING_SHIPMENT" style="align-items:center">
+    <i data-icon="package" data-size="18" style="color:var(--warn)"></i><span class="grow">待发货</span>
+    <span class="pill pill-ship" id="c-ship"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+  <a class="order-line" href="orders.html?status=PENDING_RECEIPT" style="align-items:center">
+    <i data-icon="truck" data-size="18" style="color:#2b5fbd"></i><span class="grow">待收货</span>
+    <span class="pill pill-recv" id="c-recv"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+  <a class="order-line" href="orders.html" style="align-items:center">
+    <i data-icon="list-filter" data-size="18" style="color:var(--ink-2)"></i><span class="grow">全部订单</span>
+    <i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+</div>
+<div class="card mt12" style="padding:0">
+  <a class="order-line" href="address.html" style="align-items:center"><i data-icon="map-pin" data-size="18" style="color:var(--brand)"></i><span class="grow">收货地址</span>
+    <span class="small faint" id="addrCount"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+  <a class="order-line" href="seckill.html" style="align-items:center"><i data-icon="ticket-percent" data-size="18" style="color:var(--price)"></i><span class="grow">我的秒杀</span>
+    <i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+  <a class="order-line" href="cart.html" style="align-items:center"><i data-icon="shopping-cart" data-size="18" style="color:var(--ink-2)"></i><span class="grow">购物车</span>
+    <i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+</div>
+<div class="card mt12 between" style="flex-wrap:wrap;gap:10px">
+  <span class="small faint">当前为原型演示，跳过后台与小程序端</span>
+  <button class="btn" id="logout"><i data-icon="log-out" data-size="15"></i>退出登录</button>
+</div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("category");
+var u = DB.user;
+document.getElementById("avatar").textContent = u.avatarText;
+document.getElementById("nick").textContent = u.nickname;
+document.getElementById("level").textContent = u.memberLevel;
+document.getElementById("phone").textContent = u.phone.slice(0, 3) + "****" + u.phone.slice(7);
+document.getElementById("uid").textContent = u.id;
+document.getElementById("addrCount").textContent = DB.addresses.length + " 个地址";
+function cnt(s) { return DB.orders.filter(function (o) { return o.status === s; }).length; }
+document.getElementById("c-pay").textContent = cnt("PENDING_PAYMENT");
+document.getElementById("c-ship").textContent = cnt("PENDING_SHIPMENT");
+document.getElementById("c-recv").textContent = cnt("PENDING_RECEIPT");
+document.getElementById("edit").onclick = function () { toast("原型中资料编辑未展开，实际由 REQ-104 接口实现"); };
+document.getElementById("logout").onclick = function () { location.href = "login.html"; };
+mountIcons(document);
+</script>
+</body>
+</html>

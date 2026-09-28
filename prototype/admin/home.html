@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>首页配置 · 百益后台</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/admin-shell.js"></script>
+<script>
+if (adminShell("home", { title: "首页配置", crumb: "运营", perm: "home" })) {
+  var tab = "banner";
+  var SORT_FIELDS = [["sales", "按销量"], ["new", "按上新"], ["price_asc", "价格升序"], ["price_desc", "价格降序"]];
+
+  function move(arr, i, d) {
+    var j = i + d;
+    if (j < 0 || j >= arr.length) return;
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+
+  function render() {
+    var box = document.getElementById("body");
+    if (tab === "banner") {
+      box.innerHTML = "<div class=\"rows\">" + DB.home.banners.map(function (b, i) {
+        return rowItem(i, DB.home.banners.length, img(b.image), "<div><div class=\"strong\">" + b.title + "</div>"
+          + "<div class=\"small faint\">" + b.subtitle + " · 跳转分类 " + b.linkValue + "</div></div>");
+      }).join("") + "</div>";
+    } else if (tab === "notice") {
+      box.innerHTML = "<div class=\"rows\">" + DB.home.notices.map(function (n, i) {
+        return rowItem(i, DB.home.notices.length, null, "<div class=\"strong\">" + n.content + "</div>");
+      }).join("") + "</div>";
+    } else if (tab === "nav") {
+      box.innerHTML = "<div class=\"rows\">" + DB.home.navs.map(function (n, i) {
+        return rowItem(i, DB.home.navs.length, null, "<div class=\"row g8\"><i data-icon=\"" + n.icon + "\" data-size=\"16\"></i>"
+          + "<div><div class=\"strong\">" + n.name + "</div><div class=\"small faint\">" + (n.href ? "跳转 " + n.href : "跳转分类 " + n.categoryId) + "</div></div></div>");
+      }).join("") + "</div>";
+    } else {
+      box.innerHTML = "<div class=\"rows\">" + DB.home.floors.map(function (f, i) {
+        var sel = "<select class=\"select\" data-sort=\"" + i + "\" style=\"width:auto\">"
+          + SORT_FIELDS.map(function (s) { return "<option value=\"" + s[0] + "\"" + (f.sortField === s[0] ? " selected" : "") + ">" + s[1] + "</option>"; }).join("") + "</select>";
+        return rowItem(i, DB.home.floors.length, null, "<div class=\"row g12 wrap\"><div><div class=\"strong\">" + f.title + "</div>"
+          + "<div class=\"small faint\">分类：" + (catById(f.categoryId) || {}).name + " · 取 " + f.limit + " 个商品</div></div>"
+          + "<span class=\"small faint\">排序维度</span>" + sel + "</div>");
+      }).join("") + "</div>"
+        + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>每个楼层可单独配置排序维度，前台按该维度自动拉取该分类下的商品（REQ-402、R5-Q6）。</div>";
+    }
+    bind();
+  }
+
+  function rowItem(i, len, image, inner) {
+    return "<div class=\"rowitem\">"
+      + "<span class=\"drag\"><i data-icon=\"menu\" data-size=\"16\"></i></span>"
+      + (image ? "<img src=\"" + image + "\" alt=\"\">" : "<span></span>")
+      + inner
+      + "<div class=\"inline\"><label class=\"switch\"><input type=\"checkbox\" checked><span></span></label>"
+      + "<span class=\"ord\"><button data-up=\"" + i + "\" " + (i === 0 ? "disabled" : "") + ">↑</button>"
+      + "<button data-down=\"" + i + "\" " + (i === len - 1 ? "disabled" : "") + ">↓</button></span>"
+      + "<button class=\"btn btn-sm\" data-editrow=\"" + i + "\">编辑</button>"
+      + "<button class=\"btn btn-sm\" data-delrow=\"" + i + "\">删除</button></div></div>";
+  }
+
+  function list() {
+    return tab === "banner" ? DB.home.banners : tab === "notice" ? DB.home.notices
+      : tab === "nav" ? DB.home.navs : DB.home.floors;
+  }
+
+  function bind() {
+    var arr = list();
+    document.querySelectorAll("[data-up]").forEach(function (b) { b.onclick = function () { move(arr, Number(b.dataset.up), -1); render(); toast("排序已更新"); }; });
+    document.querySelectorAll("[data-down]").forEach(function (b) { b.onclick = function () { move(arr, Number(b.dataset.down), 1); render(); toast("排序已更新"); }; });
+    document.querySelectorAll("[data-delrow]").forEach(function (b) { b.onclick = function () { arr.splice(Number(b.dataset.delrow), 1); render(); toast("已删除", "ok"); }; });
+    document.querySelectorAll("[data-editrow]").forEach(function (b) { b.onclick = function () { toast("编辑配置项：正式实现弹窗表单"); }; });
+    document.querySelectorAll("[data-sort]").forEach(function (s) {
+      s.onchange = function () {
+        DB.home.floors[Number(s.dataset.sort)].sortField = s.value;
+        toast("楼层排序维度已改为" + s.options[s.selectedIndex].text);
+      };
+    });
+  }
+
+  document.getElementById("content").innerHTML =
+    "<div class=\"panel\"><div class=\"panel-head\"><div class=\"tabs\" id=\"tabs\" style=\"border:0\">"
+    + "<button data-v=\"banner\" class=\"on\">轮播图</button><button data-v=\"notice\">公告</button>"
+    + "<button data-v=\"nav\">金刚区</button><button data-v=\"floor\">楼层推荐位</button></div>"
+    + "<button class=\"btn btn-primary btn-sm\" id=\"addRow\"><i data-icon=\"plus\" data-size=\"14\"></i>新增</button></div>"
+    + "<div class=\"panel-body\" id=\"body\"></div></div>"
+    + "<div class=\"alert alert-plain mt12\"><i data-icon=\"refresh-cw\" data-size=\"15\"></i>保存后主动失效首页缓存，前台刷新即生效，无需重启服务（REQ-401）。配置为空时前台正常展示空态。</div>";
+  document.querySelectorAll("#tabs button").forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on"); tab = b.dataset.v; render();
+    };
+  });
+  document.getElementById("addRow").onclick = function () { toast("新增配置项：正式实现弹窗表单"); };
+  render();
+  mountIcons(document.getElementById("content"));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品详情 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container">
+<div class="crumb" id="crumb"></div>
+<div class="card mt12" style="padding:20px">
+  <div class="detail" id="detail"></div>
+</div>
+<div class="card mt16">
+  <div class="tabs"><button class="on">商品详情</button><button>规格参数</button><button>售后说明</button></div>
+  <div class="card-body" id="richDetail"></div>
+</div>
+<section class="section"><div class="section-head"><div class="section-title">同类推荐</div></div>
+  <div class="grid-products" id="related"></div></section>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("category");
+var pid = Number(qs("id", 1001)), p = P(pid) || DB.products[0], qty = 1;
+var chain = catPath(p.categoryId), cat = chain[chain.length - 1] || null;
+var OFF = p.status !== "ON_SALE", soldOut = p.stock <= 0;
+document.getElementById("crumb").innerHTML =
+  "<a href=\"index.html\">首页</a><i data-icon=\"chevron-right\" data-size=\"13\"></i>"
+  + chain.map(function (c) {
+      return "<a href=\"category.html?id=" + c.id + "\">" + c.name + "</a><i data-icon=\"chevron-right\" data-size=\"13\"></i>";
+    }).join("")
+  + "<span>" + p.name + "</span>";
+
+var thumbs = [p.image].concat(DB.products.filter(function (x) { return x.categoryId === p.categoryId && x.id !== p.id; }).slice(0, 3).map(function (x) { return x.image; }));
+var paramRows = Object.keys(p.params).map(function (k) {
+  return "<div class=\"attr-row\"><dt>" + k + "</dt><dd>" + p.params[k] + "</dd></div>";
+}).join("");
+
+document.getElementById("detail").innerHTML =
+  "<div><div class=\"gallery-main\"><img id=\"mainImg\" src=\"" + img(thumbs[0]) + "\" alt=\"" + p.name + "\"></div>"
+  + "<div class=\"gallery-thumbs\">" + thumbs.map(function (t, i) {
+      return "<img src=\"" + img(t) + "\" data-i=\"" + i + "\" class=\"" + (i === 0 ? "on" : "") + "\" alt=\"商品图 " + (i + 1) + "\">";
+    }).join("") + "</div></div>"
+  + "<div>"
+  + "<h1 style=\"font-size:20px;line-height:1.5\">" + p.name + "</h1>"
+  + "<div class=\"row g8 mt8\" style=\"flex-wrap:wrap\">"
+  + (p.tags || []).map(function (t) { return "<span class=\"tag tag-price\">" + t + "</span>"; }).join("")
+  + "<span class=\"tag tag-brand\">全场包邮</span><span class=\"tag\">7 天无理由</span></div>"
+  + "<div class=\"price-box mt12\">"
+  + "<div class=\"between\"><div><span class=\"price\" style=\"font-size:26px\">" + yuan(p.price) + "</span>"
+  + "<span class=\"price-origin small\" style=\"margin-left:8px\">" + yuanPlain(p.originPrice) + "</span></div>"
+  + "<span class=\"small faint\">已售 " + p.sales + " 件</span></div>"
+  + "<div class=\"row g16 mt8 small muted\"><span>累计销量 " + p.sales + "</span><span>库存 " + (soldOut ? 0 : p.stock) + " 件</span>"
+  + "<span>" + (cat ? cat.name : "") + "</span><span>品牌 " + (DB.brands.filter(function (b) { return b.id === p.brandId; })[0] || {}).name + "</span></div></div>"
+  + "<div class=\"mt16\"><div class=\"small faint mb8\">规格</div><button class=\"btn\" style=\"border-color:var(--brand);color:var(--brand-dark);background:var(--brand-tint)\">默认规格</button></div>"
+  + "<div class=\"mt16 row g16\" style=\"flex-wrap:wrap\">"
+  + "<div><div class=\"small faint mb8\">数量</div>"
+  + "<div class=\"qty\"><button id=\"minus\" aria-label=\"减少\"><i data-icon=\"minus\" data-size=\"14\"></i></button>"
+  + "<input id=\"qty\" value=\"1\" inputmode=\"numeric\" aria-label=\"购买数量\">"
+  + "<button id=\"plus\" aria-label=\"增加\"><i data-icon=\"plus\" data-size=\"14\"></i></button></div></div>"
+  + "<div class=\"small faint\" style=\"align-self:flex-end;padding-bottom:6px\">每人限购 10 件</div></div>"
+  + "<div class=\"mt16 row g12\">"
+  + "<button class=\"btn btn-lg\" id=\"addCart\" " + ((OFF || soldOut) ? "disabled" : "") + "><i data-icon=\"shopping-cart\" data-size=\"17\"></i>加入购物车</button>"
+  + "<button class=\"btn btn-price btn-lg\" id=\"buyNow\" " + ((OFF || soldOut) ? "disabled" : "") + ">" + (soldOut ? "已售罄" : OFF ? "已下架" : "立即购买") + "</button></div>"
+  + (OFF ? "<div class=\"alert alert-warn mt12\"><i data-icon=\"circle-alert\" data-size=\"15\"></i>该商品已下架，暂时无法购买，您可以看看同类推荐</div>" : "")
+  + (soldOut && !OFF ? "<div class=\"alert alert-warn mt12\"><i data-icon=\"circle-alert\" data-size=\"15\"></i>该商品暂时缺货，可以先加入购物车等待补货</div>" : "")
+  + "<dl class=\"mt16\">" + paramRows + "</dl>"
+  + "</div>";
+
+document.getElementById("richDetail").innerHTML =
+  "<img src=\"" + img(p.image) + "\" alt=\"商品详情图\" style=\"width:100%;max-width:760px;border-radius:8px;margin:0 auto\">"
+  + "<div style=\"max-width:760px;margin:18px auto 0;color:var(--ink-2);line-height:1.9\">"
+  + "<h3 style=\"margin-bottom:8px\">" + p.name + "</h3>"
+  + "<p>本商品由百益商城自营，正品保障，全场包邮。下单后 48 小时内发货，发货后 7 天未确认将自动确认收货。</p>"
+  + "<table class=\"table mt16\"><tbody>"
+  + Object.keys(p.params).map(function (k) { return "<tr><th style=\"width:120px\">" + k + "</th><td>" + p.params[k] + "</td></tr>"; }).join("")
+  + "<tr><th>售后</th><td>支持 7 天无理由退货（不影响二次销售）</td></tr>"
+  + "<tr><th>发货</th><td>浙江杭州仓 · 48 小时内发出</td></tr>"
+  + "</tbody></table></div>";
+
+/* 同类推荐：从所在三级分类逐级向上兜底，避免叶子分类商品少时推荐为空 */
+function relatedList(target) {
+  var chain = catPath(target.categoryId);
+  for (var i = chain.length - 1; i >= 0; i--) {
+    var ids = catIds(chain[i].id);
+    var list = DB.products.filter(function (x) {
+      return x.status === "ON_SALE" && x.id !== target.id && ids.indexOf(x.categoryId) >= 0;
+    }).sort(function (a, b) { return b.sales - a.sales; });
+    if (list.length >= 4 || i === 0) return list.slice(0, 4);
+  }
+  return [];
+}
+mountGrid("#related", relatedList(p));
+
+document.querySelectorAll(".gallery-thumbs img").forEach(function (t) {
+  t.onclick = function () {
+    document.querySelectorAll(".gallery-thumbs img").forEach(function (x) { x.classList.remove("on"); });
+    t.classList.add("on");
+    document.getElementById("mainImg").src = t.src;
+  };
+});
+
+function setQty(n) {
+  qty = Math.min(10, Math.max(1, n));
+  document.getElementById("qty").value = qty;
+  document.getElementById("minus").disabled = qty <= 1;
+  document.getElementById("plus").disabled = qty >= 10;
+}
+document.getElementById("minus").onclick = function () { setQty(qty - 1); };
+document.getElementById("plus").onclick = function () { setQty(qty + 1); };
+document.getElementById("qty").oninput = function (e) { setQty(Number(e.target.value) || 1); };
+setQty(1);
+
+document.getElementById("addCart").onclick = function () { toast("已加入购物车 " + qty + " 件", "ok"); };
+document.getElementById("buyNow").onclick = function () { location.href = "checkout.html?source=BUY_NOW&id=" + p.id + "&qty=" + qty; };
+mountIcons(document);
+</script>
+</body>
+</html>

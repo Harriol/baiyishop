@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的订单 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container" style="max-width:980px">
+<div class="crumb"><a href="index.html">首页</a><i data-icon="chevron-right" data-size="13"></i><span>我的订单</span></div>
+<div class="card card-flush mt12">
+  <div class="card-body" style="padding-bottom:0">
+    <div class="tabs" id="tabs">
+      <button data-value="ALL" class="on">全部</button>
+      <button data-value="PENDING_PAYMENT">待付款</button>
+      <button data-value="PENDING_SHIPMENT">待发货</button>
+      <button data-value="PENDING_RECEIPT">待收货</button>
+      <button data-value="COMPLETED">已完成</button>
+      <button data-value="CANCELLED">已取消</button>
+    </div>
+  </div>
+  <div class="card-body" id="list"></div>
+</div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("orders");
+var cur = qs("status", "ALL");
+function itemsHTML(o) {
+  return o.items.map(function (i) {
+    var p = P(i.productId);
+    return "<div class=\"order-line\"><img src=\"" + img(p.image) + "\" alt=\"\">"
+      + "<div class=\"grow\"><a href=\"product.html?id=" + p.id + "\" class=\"clamp2\" style=\"font-weight:500\">" + p.name + "</a>"
+      + "<div class=\"small faint mt8\">默认规格</div></div>"
+      + "<div style=\"text-align:right\" class=\"small muted\">" + yuanPlain(p.price) + "<br>x" + i.quantity + "</div></div>";
+  }).join("");
+}
+function deadline(o) {
+  var t = new Date(String(o.timeoutAt || "").replace(/-/g, "/"));
+  if (isNaN(t.getTime()) || t.getTime() < Date.now()) return new Date(Date.now() + 14 * 60000 + 32000);
+  return t;
+}
+function actions(o) {
+  var no = o.orderNo;
+  if (o.status === "PENDING_PAYMENT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
+    + "<button class=\"btn\" data-cancel=\"" + no + "\">取消订单</button>"
+    + "<a class=\"btn btn-price\" href=\"pay.html\">立即支付</a>";
+  if (o.status === "PENDING_SHIPMENT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
+    + "<button class=\"btn\" data-remind=\"" + no + "\">提醒发货</button>";
+  if (o.status === "PENDING_RECEIPT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">查看物流</a>"
+    + "<button class=\"btn btn-primary\" data-receive=\"" + no + "\">确认收货</button>";
+  if (o.status === "COMPLETED") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
+    + "<button class=\"btn\" data-again=\"" + no + "\">再次购买</button>";
+  return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
+    + "<button class=\"btn\" data-delorder=\"" + no + "\">删除订单</button>"
+    + "<button class=\"btn btn-primary\" data-again=\"" + no + "\">再次购买</button>";
+}
+function render() {
+  var list = DB.orders.filter(function (o) { return cur === "ALL" || o.status === cur; });
+  var box = document.getElementById("list");
+  if (!list.length) {
+    box.innerHTML = "<div class=\"empty\"><i data-icon=\"package\" data-size=\"40\"></i><h4>暂无相关订单</h4>"
+      + "<p class=\"small\">换个状态看看，或者去挑几件商品</p><a class=\"btn btn-primary mt16\" href=\"index.html\">去逛逛</a></div>";
+    mountIcons(box); return;
+  }
+  box.innerHTML = list.map(function (o) {
+    var pending = o.status === "PENDING_PAYMENT";
+    return "<div class=\"order-card\">"
+      + "<div class=\"order-head\"><div class=\"row g12\" style=\"flex-wrap:wrap\"><span class=\"small faint\">下单时间 " + o.createdAt + "</span>"
+      + "<span class=\"small faint\">订单号 " + o.orderNo + "</span>"
+      + (o.trackingNo ? "<span class=\"small faint\">运单号 " + o.trackingNo + "</span>" : "") + "</div>"
+      + "<div class=\"row g12\">" + (pending ? "<span class=\"countdown\" data-cd=\"" + o.orderNo + "\"></span>" : "") + statusPill(o.status) + "</div></div>"
+      + itemsHTML(o)
+      + "<div class=\"order-foot\"><span class=\"small muted\">共 " + o.items.reduce(function (s, i) { return s + i.quantity; }, 0) + " 件，合计</span>"
+      + "<span class=\"price\" style=\"font-size:17px\">" + yuan(o.payAmount) + "</span>"
+      + "<span style=\"width:12px\"></span>" + actions(o) + "</div></div>";
+  }).join("");
+  mountIcons(box);
+  box.querySelectorAll("[data-cd]").forEach(function (el) {
+    var o = DB.orders.filter(function (x) { return x.orderNo === el.dataset.cd; })[0];
+    countdown(el, deadline(o));
+  });
+  bind(box);
+}
+function bind(box) {
+  box.querySelectorAll("[data-cancel]").forEach(function (b) { b.onclick = function () { confirmCancel(b.dataset.cancel); }; });
+  box.querySelectorAll("[data-remind]").forEach(function (b) { b.onclick = function () { toast("已提醒商家尽快发货", "ok"); }; });
+  box.querySelectorAll("[data-receive]").forEach(function (b) { b.onclick = function () { confirmReceive(b.dataset.receive); }; });
+  box.querySelectorAll("[data-again]").forEach(function (b) { b.onclick = function () { toast("已加入购物车", "ok"); }; });
+  box.querySelectorAll("[data-delorder]").forEach(function (b) { b.onclick = function () { toast("订单已删除", "ok"); }; });
+}
+function confirmCancel(no) {
+  openModal("<p>取消后订单将关闭，已锁定的库存会释放。确定取消订单 " + no + " 吗？</p>", { title: "取消订单",
+    footer: "<button class=\"btn\" data-close>再想想</button><button class=\"btn btn-price\" id=\"ok\">确定取消</button>" });
+  document.getElementById("ok").onclick = function () {
+    var o = DB.orders.filter(function (x) { return x.orderNo === no; })[0];
+    o.status = "CANCELLED"; o.cancelTime = "刚刚"; o.cancelReason = "用户主动取消";
+    closeModal(); toast("订单已取消", "ok"); render();
+  };
+}
+function confirmReceive(no) {
+  openModal("<p>请确认已收到商品。确认后订单将完成，且不可撤销。</p>", { title: "确认收货",
+    footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认收货</button>" });
+  document.getElementById("ok").onclick = function () {
+    var o = DB.orders.filter(function (x) { return x.orderNo === no; })[0];
+    o.status = "COMPLETED"; o.receiveTime = "刚刚";
+    closeModal(); toast("确认收货成功", "ok"); render();
+  };
+}
+document.querySelectorAll("#tabs button").forEach(function (b) {
+  if (b.dataset.value === cur) { document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); }); b.classList.add("on"); }
+  b.onclick = function () { cur = b.dataset.value; render(); };
+});
+render();
+</script>
+</body>
+</html>

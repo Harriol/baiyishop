@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>购物车 · 百益商城小程序</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/mini.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/mini-shell.js"></script>
+<script>
+var bar = "<div class=\"m-bar\" id=\"bar\"></div>";
+var body = miniShell({ tab: "cart", title: "购物车", bar: bar });
+var cart = DB.cart;
+function calc() {
+  var items = cart.filter(function (c) { return c.checked && !c.invalid; });
+  return { amount: sum(items.map(function (c) { return mul(P(c.productId).price, c.quantity); })),
+    count: items.reduce(function (s, c) { return s + c.quantity; }, 0) };
+}
+function render() {
+  var t = calc();
+  document.getElementById("bar").innerHTML = "<label class=\"check\"><input type=\"checkbox\" id=\"all\" "
+    + (cart.filter(function (c) { return !c.invalid; }).every(function (c) { return c.checked; }) ? "checked" : "") + "><span class=\"small\">全选</span></label>"
+    + "<span class=\"small muted\" style=\"margin-left:auto\">合计 <b style=\"color:var(--price);font-size:16px\">" + yuanPlain(t.amount) + "</b></span>"
+    + "<button class=\"m-btn price\" id=\"go\" " + (t.count === 0 ? "disabled" : "") + ">去结算(" + t.count + ")</button>";
+  body.innerHTML = cart.length ? "<div style=\"padding:10px 12px 0\">" + cart.map(function (c) {
+    var p = P(c.productId);
+    return "<div class=\"m-row\" style=\"background:var(--surface);border-radius:10px;margin-bottom:8px;padding:10px;" + (c.invalid ? "opacity:.6" : "") + "\">"
+      + "<label class=\"check\"><input type=\"checkbox\" data-cb=\"" + c.id + "\" " + (c.checked && !c.invalid ? "checked" : "") + " " + (c.invalid ? "disabled" : "") + "></label>"
+      + "<img class=\"pic\" src=\"" + img(p.image) + "\" alt=\"\">"
+      + "<div class=\"grow\"><div class=\"nm clamp2\" style=\"font-size:12.5px\">" + p.name + "</div>"
+      + "<div class=\"row mt8\"><span style=\"color:var(--price);font-weight:700\">" + yuanPlain(p.price) + "</span>"
+      + "<span class=\"small faint\" style=\"margin-left:auto\">x" + c.quantity + "</span></div>"
+      + (c.invalid ? "<div class=\"small\" style=\"color:var(--price)\">" + c.invalidReason + "</div>" : "") + "</div></div>";
+  }).join("") + "</div>"
+    : "<div class=\"empty\" style=\"padding-top:90px\"><i data-icon=\"shopping-cart\" data-size=\"40\"></i><h4>购物车还是空的</h4>"
+      + "<a class=\"m-btn mt16\" href=\"index.html\">去逛逛</a></div>";
+  body.querySelectorAll("[data-cb]").forEach(function (cb) {
+    cb.onchange = function () {
+      cart.filter(function (c) { return c.id === Number(cb.dataset.cb); })[0].checked = cb.checked; render();
+    };
+  });
+  var all = document.getElementById("all");
+  all.onchange = function () { cart.forEach(function (c) { if (!c.invalid) c.checked = all.checked; }); render(); };
+  var go = document.getElementById("go");
+  if (go) go.onclick = function () { location.href = "../checkout.html?source=CART"; };
+  mountMiniIcons(body);
+}
+render();
+</script>
+</body>
+</html>

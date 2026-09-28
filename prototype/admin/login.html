@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 百益后台</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+<main class="container" style="max-width:420px">
+<div class="card mt24">
+  <div class="center" style="flex-direction:column;gap:6px;padding:6px 0 16px">
+    <div class="logo-mark" style="width:40px;height:40px;font-size:20px;border-radius:8px">益</div>
+    <h2 style="font-size:17px">百益商城 · 运营后台</h2>
+    <p class="small faint">后台账号与前台用户相互隔离</p>
+  </div>
+  <div class="form-grid">
+    <div class="field"><label>账号</label><input class="input" id="u" value="harriol" autocomplete="username"></div>
+    <div class="field"><label>密码</label><input class="input" id="p" type="password" value="123456" autocomplete="current-password"></div>
+    <div class="field"><label>演示角色</label>
+      <div class="role-switch" id="roleSeg">
+        <button data-role="SUPER_ADMIN" class="on">超级管理员</button>
+        <button data-role="OPERATOR">运营</button>
+        <button data-role="SERVICE">客服</button>
+      </div>
+      <div class="hint">切换角色可体验不同权限：客服仅能查单与备注，其余模块返回 403</div></div>
+    <button class="btn btn-primary btn-lg btn-block" id="login">登录后台</button>
+  </div>
+  <div class="alert alert-plain mt16"><i data-icon="info" data-size="15"></i>原型演示：任意账号密码均可登录，登录后可在右上角随时切换角色。</div>
+</div>
+</main>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/admin-shell.js"></script>
+<script>
+var picked = "SUPER_ADMIN";
+document.querySelectorAll("#roleSeg button").forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll("#roleSeg button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on"); picked = b.dataset.role;
+  };
+});
+document.getElementById("login").onclick = function () {
+  var u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
+  if (!u || p.length < 6) { toast("请输入账号与至少 6 位密码", "err"); return; }
+  setRole(picked);
+  location.href = "index.html";
+};
+mountIcons(document);
+</script>
+</body>
+</html>

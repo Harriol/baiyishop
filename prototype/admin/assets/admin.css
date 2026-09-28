@@ -1,0 +1,131 @@
+
+/* ==========================================================================
+   百益商城 · 运营后台 原型样式（复用 ../assets/css/app.css 的设计令牌）
+   面向运营工具：信息密度高、视觉克制、便于扫读与重复操作
+   ========================================================================== */
+
+.admin { display: grid; grid-template-columns: 212px 1fr; min-height: 100vh; }
+
+/* ---------- 侧边栏 ---------- */
+.sidebar {
+  background: var(--surface); border-right: 1px solid var(--line);
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+}
+.side-logo {
+  height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+  border-bottom: 1px solid var(--line-2); font-weight: 700; font-size: 15px; white-space: nowrap;
+}
+.side-logo small { font-weight: 400; font-size: 12px; color: var(--ink-3); }
+.side-nav { padding: 8px; overflow: auto; flex: 1; }
+.side-nav .grp { padding: 12px 10px 6px; font-size: 12px; color: var(--ink-3); }
+.side-nav a {
+  display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: var(--r);
+  color: var(--ink-2); font-size: 13.5px; white-space: nowrap;
+}
+.side-nav a:hover { background: var(--line-2); color: var(--ink); }
+.side-nav a.on { background: var(--brand-tint); color: var(--brand-dark); font-weight: 600; }
+.side-nav a.locked { opacity: .45; cursor: not-allowed; }
+.side-nav a .badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--price); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 600;
+}
+.side-foot { padding: 10px 12px; border-top: 1px solid var(--line-2); font-size: 12px; color: var(--ink-3); }
+
+/* ---------- 主区 ---------- */
+.main { min-width: 0; display: flex; flex-direction: column; }
+.adminbar {
+  height: 56px; background: var(--surface); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 12px; padding: 0 18px; position: sticky; top: 0; z-index: 30;
+}
+.adminbar .crumbbar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); min-width: 0; }
+.adminbar .crumbbar b { color: var(--ink); font-weight: 600; }
+.content { padding: 18px; flex: 1; min-width: 0; }
+
+/* ---------- 角色切换 ---------- */
+.role-switch { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.role-switch button { padding: 5px 11px; border: 0; background: var(--surface); color: var(--ink-2); cursor: pointer; font-size: 12.5px; }
+.role-switch button + button { border-left: 1px solid var(--line); }
+.role-switch button.on { background: var(--brand-tint); color: var(--brand-dark); font-weight: 600; }
+
+/* ---------- 工具条 ---------- */
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.toolbar .input, .toolbar .select { width: auto; min-width: 150px; height: 34px; }
+.toolbar .spacer { flex: 1 1 auto; }
+
+/* ---------- 指标卡 ---------- */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; }
+.stat .k { font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.stat .v { font-size: 26px; font-weight: 700; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.stat .d { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+
+/* ---------- 面板 ---------- */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.panel + .panel { margin-top: 12px; }
+.panel-head { padding: 12px 16px; border-bottom: 1px solid var(--line-2); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.panel-head h3 { font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
+.panel-body { padding: 16px; }
+.panel-body.flush { padding: 0; }
+
+/* ---------- 表格容器 ---------- */
+.table-wrap { overflow-x: auto; }
+.table td .cell-main { display: flex; align-items: center; gap: 10px; min-width: 200px; }
+.table td img.thumb { width: 40px; height: 40px; border-radius: var(--r-sm); object-fit: cover; background: #f1f2f3; flex: none; }
+.table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.table .num { font-variant-numeric: tabular-nums; }
+
+/* ---------- 表单行 ---------- */
+.form-grid { display: grid; gap: 14px; }
+.form-row { display: grid; grid-template-columns: 104px 1fr; gap: 12px; align-items: start; }
+.form-row > label { font-size: 13px; color: var(--ink-2); padding-top: 9px; }
+.form-row .hint { font-size: 12px; color: var(--ink-3); margin-top: 5px; }
+.form-section { font-size: 13px; font-weight: 600; color: var(--ink); padding: 4px 0 10px; border-bottom: 1px solid var(--line-2); margin-bottom: 4px; }
+.inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- 排序 / 启停行（首页配置、楼层） ---------- */
+.rows { display: grid; gap: 8px; }
+.rowitem {
+  display: grid; grid-template-columns: 34px 56px 1fr auto; gap: 12px; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+}
+.rowitem .drag { color: var(--ink-3); cursor: grab; }
+.rowitem img { width: 56px; height: 40px; object-fit: cover; border-radius: var(--r-sm); background: #f1f2f3; }
+.rowitem .ord { display: inline-flex; gap: 4px; }
+.rowitem .ord button { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); cursor: pointer; color: var(--ink-2); }
+.rowitem .ord button:hover { border-color: var(--brand); color: var(--brand); }
+
+/* ---------- 403 / 空态 ---------- */
+.forbidden { max-width: 520px; margin: 60px auto; text-align: center; }
+.forbidden .icon { color: var(--price); }
+
+/* ---------- 详情描述列表 ---------- */
+.dl { display: grid; grid-template-columns: 96px 1fr; gap: 8px 14px; font-size: 13px; }
+.dl dt { color: var(--ink-3); }
+.dl dd { margin: 0; }
+
+/* ---------- 弹窗内的表单 ---------- */
+.modal .field + .field { margin-top: 12px; }
+
+/* ---------- 权限矩阵 ---------- */
+.matrix td.c, .matrix th.c { text-align: center; width: 92px; }
+.matrix .lock { color: var(--ink-3); font-size: 12px; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1024px) {
+  .admin { grid-template-columns: 60px 1fr; }
+  .side-logo small, .side-nav a span.t, .side-nav .grp { display: none; }
+  .side-logo, .side-nav a { justify-content: center; }
+  .side-nav a .badge { position: absolute; margin: 0 0 16px 16px; }
+  .side-nav a { position: relative; }
+}
+@media (max-width: 720px) {
+  .admin { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .side-nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px; }
+  .side-nav a { flex: none; }
+  .side-nav a span.t { display: inline; }
+  .content { padding: 12px; }
+  .form-row { grid-template-columns: 1fr; }
+  .form-row > label { padding-top: 0; }
+  .rowitem { grid-template-columns: 1fr; }
+}

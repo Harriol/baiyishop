@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>秒杀活动 · 百益后台</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/admin-shell.js"></script>
+<script>
+if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "seckill" })) {
+  function render() {
+    document.getElementById("list").innerHTML = DB.seckill.sessions.map(function (s) {
+      var items = DB.seckill.items.filter(function (i) { return i.sessionId === s.id; });
+      var pill = s.status === "RUNNING" ? "<span class=\"pill pill-pay\">抢购中</span>"
+        : s.status === "NOT_STARTED" ? "<span class=\"pill pill-ship\">即将开始</span>" : "<span class=\"pill pill-cancel\">已结束</span>";
+      return "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"ticket-percent\" data-size=\"16\"></i>" + s.name + " " + pill + "</h3>"
+        + "<div class=\"small faint\">" + s.startTime + " ~ " + s.endTime + " · 共 " + items.length + " 个秒杀商品</div>"
+        + "<div class=\"inline\">"
+        + (s.status === "RUNNING" ? "<button class=\"btn btn-sm\" data-end=\"" + s.id + "\">结束活动并回补</button>" : "")
+        + "<button class=\"btn btn-sm\" data-edit=\"" + s.id + "\">编辑</button></div></div>"
+        + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">秒杀价</th><th class=\"num\">原价</th><th class=\"num\">划拨库存</th><th class=\"num\">已售</th><th class=\"num\">每人限购</th><th>进度</th></tr></thead><tbody>"
+        + items.map(function (it) {
+            var p = P(it.productId);
+            var pct = Math.round(it.sold / it.total * 100);
+            return "<tr><td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.image) + "\" alt=\"\"><span>" + p.name + "</span></div></td>"
+              + "<td class=\"num price\">" + yuanPlain(it.seckillPrice) + "</td><td class=\"num muted\">" + yuanPlain(it.originPrice) + "</td>"
+              + "<td class=\"num\">" + it.total + "</td><td class=\"num\">" + it.sold + "</td><td class=\"num\">" + it.limitPerUser + "</td>"
+              + "<td style=\"min-width:120px\"><div class=\"progress\"><i style=\"width:" + pct + "%\"></i></div><span class=\"small faint\">" + pct + "%</span></td></tr>";
+          }).join("")
+        + "</tbody></table></div></div>";
+    }).join("");
+
+    document.querySelectorAll("[data-end]").forEach(function (b) {
+      b.onclick = function () {
+        var id = Number(b.dataset.end);
+        var items = DB.seckill.items.filter(function (i) { return i.sessionId === id; });
+        var left = items.reduce(function (n, i) { return n + (i.total - i.sold); }, 0);
+        openModal("<p>结束后未售出的秒杀库存将自动回补到普通库存。</p>"
+          + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>本场未售出合计 <b>" + left + "</b> 件，回补后将写入秒杀池流水与库存流水（REQ-504）。</div>",
+          { title: "结束活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认结束并回补</button>" });
+        document.getElementById("ok").onclick = function () {
+          items.forEach(function (i) { i.sold = i.total; });
+          DB.seckill.sessions.filter(function (s) { return s.id === id; })[0].status = "ENDED";
+          closeModal(); toast("活动已结束，" + left + " 件库存已回补", "ok"); render();
+        };
+      };
+    });
+    document.querySelectorAll("[data-edit]").forEach(function (b) { b.onclick = function () { toast("编辑活动：正式实现调用活动更新接口"); }; });
+  }
+
+  function create() {
+    openModal(
+      "<div class=\"form-grid\">"
+      + "<div class=\"field\"><label>活动名称</label><input class=\"input\" id=\"a-name\" placeholder=\"如：国庆秒杀\"></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" placeholder=\"2026-10-01 10:00:00\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" placeholder=\"2026-10-01 12:00:00\"></div></div>"
+      + "<div class=\"field\"><label>秒杀商品</label><select class=\"select\" id=\"a-sku\">"
+      + DB.products.map(function (p) { return "<option value=\"" + p.id + "\">" + p.name + "</option>"; }).join("") + "</select></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>秒杀价（元）</label><input class=\"input\" id=\"a-price\" placeholder=\"59.00\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>划拨库存</label><input class=\"input\" id=\"a-stock\" placeholder=\"100\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>每人限购</label><input class=\"input\" id=\"a-limit\" placeholder=\"1\"></div></div>"
+      + "<div class=\"alert alert-plain\"><i data-icon=\"info\" data-size=\"15\"></i>划拨时普通库存立即扣减；超出可售库存会被拒绝（40005）；活动结束未售出自动回补。</div></div>",
+      { title: "新增秒杀活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">创建活动</button>" });
+    document.getElementById("ok").onclick = function () {
+      var name = document.getElementById("a-name").value.trim();
+      var start = document.getElementById("a-start").value.trim();
+      var end = document.getElementById("a-end").value.trim();
+      var stock = Number(document.getElementById("a-stock").value);
+      if (!name) { toast("请填写活动名称", "err"); return; }
+      if (!start || !end || end <= start) { toast("起止时间不合法（10001）", "err"); return; }
+      if (!stock) { toast("请填写划拨库存", "err"); return; }
+      closeModal(); toast("活动已创建，库存划拨完成", "ok");
+    };
+  }
+
+  document.getElementById("content").innerHTML =
+    "<div class=\"toolbar\"><span class=\"small faint\">秒杀库存独立划拨自普通库存，超时未支付 15 分钟自动取消并回补</span>"
+    + "<span class=\"spacer\"></span><button class=\"btn btn-primary\" id=\"create\"><i data-icon=\"plus\" data-size=\"15\"></i>新增活动</button></div>"
+    + "<div id=\"list\"></div>";
+  document.getElementById("create").onclick = create;
+  render();
+  mountIcons(document.getElementById("content"));
+}
+</script>
+</body>
+</html>

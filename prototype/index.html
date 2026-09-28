@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>首页 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container">
+<section class="section" style="margin-top:16px">
+  <div class="home-hero">
+    <nav class="hero-cats" id="heroCats" aria-label="商品分类导航"></nav>
+    <div class="banner-strip" id="banner">
+      <img id="bannerImg" src="" alt="">
+      <div class="caption"><h3 id="bannerTitle"></h3><p class="small" id="bannerSub" style="opacity:.85"></p></div>
+      <div class="banner-dots" id="bannerDots"></div>
+    </div>
+  </div>
+  <div class="notice-bar">
+    <i data-icon="info" data-size="15"></i>
+    <span class="grow ellipsis" id="noticeText"></span>
+    <span class="small faint nowrap">本场秒杀</span>
+    <span class="countdown" id="flashCd"></span>
+    <a class="btn btn-sm" href="seckill.html">去抢购<i data-icon="chevron-right" data-size="14"></i></a>
+  </div>
+</section>
+
+<section class="section">
+  <div class="kingkong" id="kingkong"></div>
+</section>
+
+<section class="section" id="flashSection"></section>
+
+<div id="floors"></div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("home");
+
+/* 轮播 */
+var banners = DB.home.banners, bi = 0;
+function paintBanner() {
+  var b = banners[bi];
+  document.getElementById("bannerImg").src = img(b.image);
+  document.getElementById("bannerImg").alt = b.title;
+  document.getElementById("bannerTitle").textContent = b.title;
+  document.getElementById("bannerSub").textContent = b.subtitle;
+  document.getElementById("bannerDots").innerHTML = banners.map(function (_, i) {
+    return "<i class=\"" + (i === bi ? "on" : "") + "\"></i>";
+  }).join("");
+}
+paintBanner();
+setInterval(function () { bi = (bi + 1) % banners.length; paintBanner(); }, 5000);
+
+/* 左侧三级分类导航（悬停展开二级 / 三级） */
+document.getElementById("heroCats").innerHTML =
+  "<ul>" + catTree().map(function (l1) {
+    var rows = l1.children.map(function (l2) {
+      var l3 = l2.children.map(function (c) {
+        return "<a href=\"category.html?id=" + c.id + "\">" + c.name + "</a>";
+      }).join("");
+      return "<div class=\"fly-row\"><dt><a href=\"category.html?id=" + l2.id + "\">" + l2.name + "</a></dt>"
+        + "<dd>" + (l3 || "<span class=\"small faint\">暂无子分类</span>") + "</dd></div>";
+    }).join("");
+    return "<li><a class=\"hero-cat\" href=\"category.html?id=" + l1.id + "\">" + l1.name
+      + "<i data-icon=\"chevron-right\" data-size=\"14\" class=\"more\"></i></a>"
+      + "<div class=\"hero-flyout\"><div class=\"fly-title\"><i data-icon=\"layout-grid\" data-size=\"14\"></i>"
+      + l1.name + "</div><dl>" + rows + "</dl></div></li>";
+  }).join("")
+  + "<li><a class=\"hero-cat hero-more\" href=\"category.html\">查看全部分类<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></li>"
+  + "</ul>";
+mountIcons(document.getElementById("heroCats"));
+
+/* 公告轮播 */
+var ni = 0;
+function paintNotice() { document.getElementById("noticeText").textContent = DB.home.notices[ni].content; }
+paintNotice();
+setInterval(function () { ni = (ni + 1) % DB.home.notices.length; paintNotice(); }, 4000);
+
+/* 秒杀倒计时（当前进行中的场次） */
+var running = DB.seckill.sessions.filter(function (s) { return s.status === "RUNNING"; })[0];
+if (running) countdown(document.getElementById("flashCd"), running.endTime);
+
+/* 金刚区 */
+document.getElementById("kingkong").innerHTML = DB.home.navs.map(function (n) {
+  var href = n.href || ("category.html?id=" + n.categoryId);
+  return "<a href=\"" + href + "\"><span class=\"kk-icon\"><i data-icon=\"" + n.icon + "\" data-size=\"20\"></i></span><span>" + n.name + "</span></a>";
+}).join("");
+
+/* 秒杀预告条 */
+var flashItems = DB.seckill.items.filter(function (i) { return i.sessionId === (running ? running.id : DB.seckill.sessions[0].id); }).slice(0, 4);
+if (flashItems.length) {
+  document.getElementById("flashSection").innerHTML =
+    "<div class=\"flash-head\"><h3><i data-icon=\"zap\" data-size=\"18\"></i>限时秒杀</h3>"
+    + "<span class=\"small\" style=\"opacity:.8\">整点开抢 · 每人限购</span>"
+    + "<a class=\"btn btn-sm\" href=\"seckill.html\" style=\"margin-left:auto\">查看全部</a></div>"
+    + "<div class=\"grid-products\" style=\"margin-top:12px\">"
+    + flashItems.map(function (it) {
+        var p = P(it.productId);
+        var soldOut = it.sold >= it.total;
+        return "<a class=\"product-card\" href=\"seckill.html\">"
+          + "<div class=\"product-thumb\"><img src=\"" + img(p.image) + "\" alt=\"" + p.name + "\" loading=\"lazy\">"
+          + "<span class=\"corner\"><span class=\"tag tag-solid\">" + (soldOut ? "已售罄" : "秒杀") + "</span></span></div>"
+          + "<div class=\"product-info\"><h4 class=\"product-name clamp2\">" + p.name + "</h4>"
+          + "<div class=\"product-meta\"><span class=\"price\">" + yuan(it.seckillPrice) + "</span>"
+          + "<span class=\"price-origin small\">" + yuanPlain(it.originPrice) + "</span></div>"
+          + "<div class=\"progress\"><i style=\"width:" + Math.round(it.sold / it.total * 100) + "%\"></i></div>"
+          + "<span class=\"small faint\">已抢 " + it.sold + " / " + it.total + "</span></div></a>";
+      }).join("")
+    + "</div>";
+}
+
+/* 楼层 */
+document.getElementById("floors").innerHTML = DB.home.floors.map(function (f) {
+  var list = categoryProducts(f.categoryId, f.sortField).slice(0, f.limit);
+  return "<section class=\"section\"><div class=\"section-head\">"
+    + "<div class=\"section-title\">" + f.title + "</div>"
+    + "<span class=\"small faint\">按" + sortLabel(f.sortField) + "排序</span>"
+    + "<a class=\"btn btn-sm\" href=\"category.html?id=" + f.categoryId + "\">更多<i data-icon=\"chevron-right\" data-size=\"14\"></i></a>"
+    + "</div><div class=\"grid-products\">" + list.map(productCard).join("") + "</div></section>";
+}).join("");
+mountIcons(document);
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>购物车 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container">
+<div class="crumb"><a href="index.html">首页</a><i data-icon="chevron-right" data-size="13"></i><span>购物车</span></div>
+<div id="steps"></div>
+<div id="cartBox"></div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("category");
+document.getElementById("steps").innerHTML = stepbar(1);
+var cart = DB.cart;
+
+function calc() {
+  var items = cart.filter(function (c) { return c.checked && !c.invalid; });
+  var amount = sum(items.map(function (c) { return mul(P(c.productId).price, c.quantity); }));
+  var count = items.reduce(function (s, c) { return s + c.quantity; }, 0);
+  return { amount: amount, count: count, items: items };
+}
+
+function render() {
+  var box = document.getElementById("cartBox");
+  if (!cart.length) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"shopping-cart\" data-size=\"40\"></i>"
+      + "<h4>购物车还是空的</h4><p class=\"small\">挑几件喜欢的商品放进来吧</p>"
+      + "<a class=\"btn btn-primary mt16\" href=\"index.html\">去逛逛</a></div></div>";
+    mountIcons(box); return;
+  }
+  var t = calc();
+  var allChecked = cart.filter(function (c) { return !c.invalid; }).every(function (c) { return c.checked; });
+  box.innerHTML =
+    "<div class=\"card card-flush\">"
+    + "<div class=\"card-head\"><label class=\"check\"><input type=\"checkbox\" id=\"all\" " + (allChecked ? "checked" : "") + "><span>全选</span></label>"
+    + "<span class=\"small faint\">共 " + cart.length + " 种商品</span></div>"
+    + cart.map(function (c) {
+        var p = P(c.productId);
+        return "<div class=\"order-line\" style=\"" + (c.invalid ? "opacity:.6" : "") + "\">"
+          + "<label class=\"check\" style=\"align-self:center\"><input type=\"checkbox\" data-id=\"" + c.id + "\" " + (c.checked && !c.invalid ? "checked" : "") + " " + (c.invalid ? "disabled" : "") + "></label>"
+          + "<img src=\"" + img(p.image) + "\" alt=\"" + p.name + "\">"
+          + "<div class=\"grow\"><a href=\"product.html?id=" + p.id + "\" class=\"clamp2\" style=\"font-weight:500\">" + p.name + "</a>"
+          + "<div class=\"small faint mt8\">默认规格 · 全场包邮</div>"
+          + (c.invalid ? "<div class=\"small\" style=\"color:var(--price)\">" + c.invalidReason + "，暂不可结算</div>" : "") + "</div>"
+          + "<div style=\"width:78px;text-align:right\" class=\"price\">" + yuan(p.price) + "</div>"
+          + "<div class=\"qty\"><button data-dec=\"" + c.id + "\" " + (c.invalid || c.quantity <= 1 ? "disabled" : "") + "><i data-icon=\"minus\" data-size=\"13\"></i></button>"
+          + "<input value=\"" + c.quantity + "\" data-qty=\"" + c.id + "\" inputmode=\"numeric\" " + (c.invalid ? "disabled" : "") + ">"
+          + "<button data-inc=\"" + c.id + "\" " + (c.invalid ? "disabled" : "") + "><i data-icon=\"plus\" data-size=\"13\"></i></button></div>"
+          + "<div style=\"width:92px;text-align:right\" class=\"price strong\">" + yuan(mul(p.price, c.quantity)) + "</div>"
+          + "<button class=\"btn btn-ghost btn-sm\" data-del=\"" + c.id + "\" aria-label=\"删除\"><i data-icon=\"trash-2\" data-size=\"16\"></i></button>"
+          + "</div>";
+      }).join("")
+    + "</div>"
+    + "<div class=\"card mt12 between\" style=\"position:sticky;bottom:12px;flex-wrap:wrap;gap:12px\">"
+    + "<div class=\"row g16\" style=\"flex-wrap:wrap\"><span class=\"small muted\">已选 <b style=\"color:var(--price)\">" + t.count + "</b> 件</span>"
+    + "<span class=\"small faint\">全场包邮，运费 ¥0.00</span></div>"
+    + "<div class=\"row g16\"><span class=\"small muted\">合计（不含运费）</span><span class=\"price\" style=\"font-size:22px\">" + yuan(t.amount) + "</span>"
+    + "<button class=\"btn btn-price btn-lg\" id=\"checkout\" " + (t.count === 0 ? "disabled" : "") + ">去结算</button></div></div>";
+  mountIcons(box);
+  bind();
+}
+
+function bind() {
+  var box = document.getElementById("cartBox");
+  box.querySelectorAll("[data-id]").forEach(function (cb) {
+    cb.onchange = function () { cart.filter(function (c) { return c.id === Number(cb.dataset.id); })[0].checked = cb.checked; render(); };
+  });
+  box.querySelectorAll("[data-inc]").forEach(function (b) { b.onclick = function () { change(Number(b.dataset.inc), 1); }; });
+  box.querySelectorAll("[data-dec]").forEach(function (b) { b.onclick = function () { change(Number(b.dataset.dec), -1); }; });
+  box.querySelectorAll("[data-qty]").forEach(function (i) { i.oninput = function () { setQty(Number(i.dataset.qty), Number(i.value) || 1); }; });
+  box.querySelectorAll("[data-del]").forEach(function (b) {
+    b.onclick = function () {
+      var id = Number(b.dataset.del);
+      openModal("<p>确定要删除这件商品吗？</p>", { title: "删除商品",
+        footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"okDel\">删除</button>" });
+      document.getElementById("okDel").onclick = function () {
+        cart = cart.filter(function (c) { return c.id !== id; });
+        DB.cart = cart; closeModal(); toast("已删除", "ok"); render();
+      };
+    };
+  });
+  var all = document.getElementById("all");
+  if (all) all.onchange = function () {
+    cart.forEach(function (c) { if (!c.invalid) c.checked = all.checked; });
+    render();
+  };
+  var co = document.getElementById("checkout");
+  if (co) co.onclick = function () { location.href = "checkout.html?source=CART"; };
+}
+
+function change(id, d) { var c = cart.filter(function (x) { return x.id === id; })[0]; setQty(id, c.quantity + d); }
+function setQty(id, n) {
+  var c = cart.filter(function (x) { return x.id === id; })[0];
+  if (n > 10) { toast("单品最多购买 10 件", "err"); n = 10; }
+  c.quantity = Math.max(1, n); render();
+}
+render();
+</script>
+</body>
+</html>

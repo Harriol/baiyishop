@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>确认订单 · 百益商城</title>
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<main class="container">
+<div class="crumb"><a href="cart.html">购物车</a><i data-icon="chevron-right" data-size="13"></i><span>确认订单</span></div>
+<div id="steps"></div>
+<div id="box"></div>
+</main>
+
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/ui.js"></script>
+<script>
+pageInit("category");
+document.getElementById("steps").innerHTML = stepbar(2);
+var source = qs("source", "CART"), pid = Number(qs("id", 0)), qn = Number(qs("qty", 1));
+var addrId = (DB.addresses.filter(function (a) { return a.isDefault; })[0] || DB.addresses[0]).id;
+
+function items() {
+  if (source === "BUY_NOW") { var p = P(pid) || DB.products[0]; return [{ productId: p.id, quantity: qn }]; }
+  return DB.cart.filter(function (c) { return c.checked && !c.invalid; }).map(function (c) { return { productId: c.productId, quantity: c.quantity }; });
+}
+
+function render() {
+  var list = items();
+  var amount = sum(list.map(function (i) { return mul(P(i.productId).price, i.quantity); }));
+  var addr = DB.addresses.filter(function (a) { return a.id === addrId; })[0];
+  document.getElementById("box").innerHTML =
+    "<div class=\"card\"><div class=\"between mb12\"><h3 style=\"font-size:15px;display:flex;align-items:center;gap:6px\"><i data-icon=\"map-pin\" data-size=\"16\"></i>收货地址</h3>"
+    + "<button class=\"btn btn-sm\" id=\"addAddr\"><i data-icon=\"plus\" data-size=\"14\"></i>新增地址</button></div>"
+    + "<div style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px\">"
+    + DB.addresses.map(function (a) {
+        return "<div class=\"addr-card " + (a.id === addrId ? "on" : "") + "\" data-a=\"" + a.id + "\">"
+          + "<div class=\"strong\">" + a.receiverName + " <span class=\"muted small\">" + a.receiverPhone.slice(0, 3) + "****" + a.receiverPhone.slice(7) + "</span>"
+          + (a.isDefault ? " <span class=\"tag tag-brand\">默认</span>" : "") + "</div>"
+          + "<div class=\"small muted mt8\">" + a.province + a.city + a.district + " " + a.detail + "</div></div>";
+      }).join("") + "</div></div>"
+
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\" class=\"mb12\">商品清单</h3>"
+    + "<table class=\"table mt12\"><thead><tr><th>商品</th><th>单价</th><th>数量</th><th class=\"num\">小计</th></tr></thead><tbody>"
+    + list.map(function (i) {
+        var p = P(i.productId);
+        return "<tr><td><div class=\"row g8\"><img src=\"" + img(p.image) + "\" alt=\"\" style=\"width:48px;height:48px;border-radius:6px;object-fit:cover\">"
+          + "<a href=\"product.html?id=" + p.id + "\" class=\"clamp2\">" + p.name + "</a></div></td>"
+          + "<td class=\"num\">" + yuanPlain(p.price) + "</td><td class=\"num\">x" + i.quantity + "</td>"
+          + "<td class=\"num price\">" + yuan(mul(p.price, i.quantity)) + "</td></tr>";
+      }).join("") + "</tbody></table></div>"
+
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单备注</h3>"
+    + "<input class=\"input mt12\" id=\"remark\" placeholder=\"选填，如对发货时间的要求\" maxlength=\"100\"></div>"
+
+    + "<div class=\"card mt12\"><div class=\"amount-row\"><span class=\"muted\">商品金额</span><span>" + yuanPlain(amount) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">运费</span><span>" + yuanPlain("0.00") + " <span class=\"tag tag-brand\">全场包邮</span></span></div>"
+    + "<div class=\"amount-row total\"><span class=\"strong\">应付金额</span><span class=\"price\">" + yuan(amount) + "</span></div></div>"
+
+    + "<div class=\"card mt12 between\" style=\"flex-wrap:wrap;gap:12px\">"
+    + "<span class=\"small faint\">提交后 15 分钟内未支付，订单将自动取消并释放库存</span>"
+    + "<button class=\"btn btn-price btn-lg\" id=\"submit\">提交订单</button></div>";
+  mountIcons(document.getElementById("box"));
+  document.querySelectorAll("[data-a]").forEach(function (c) { c.onclick = function () { addrId = Number(c.dataset.a); render(); }; });
+  document.getElementById("addAddr").onclick = function () { toast("原型中地址新增在「地址管理」页演示"); };
+  document.getElementById("submit").onclick = function () {
+    if (!DB.addresses.length) { toast("请先添加收货地址", "err"); return; }
+    var no = genOrderNo();
+    sessionStorage.setItem("baiyi_pending", JSON.stringify({
+      orderNo: no, payAmount: amount, source: source, items: list,
+      timeoutAt: new Date(Date.now() + 15 * 60000).toISOString(), remark: document.getElementById("remark").value
+    }));
+    location.href = "pay.html";
+  };
+}
+render();
+</script>
+</body>
+</html>

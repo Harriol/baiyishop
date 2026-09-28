@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>订单管理 · 百益后台</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/admin-shell.js"></script>
+<script>
+var gate = adminShell("orders", { title: "订单管理", crumb: "交易", perm: "order:read" });
+if (gate) {
+  var canShip = hasPerm("order:ship"), canNote = hasPerm("order:note");
+  var rows = ADMIN_DB.orders.slice();
+  var kw = "", st = "ALL";
+
+  function statusOptions() {
+    return ["ALL", "PENDING_PAYMENT", "PENDING_SHIPMENT", "PENDING_RECEIPT", "COMPLETED", "CANCELLED"].map(function (s) {
+      return "<option value=\"" + s + "\"" + (st === s ? " selected" : "") + ">" + (s === "ALL" ? "全部状态" : DB.statusText[s]) + "</option>";
+    }).join("");
+  }
+
+  function render() {
+    var list = rows.filter(function (o) {
+      if (st !== "ALL" && o.status !== st) return false;
+      if (kw && o.orderNo.indexOf(kw) < 0 && o.buyer.indexOf(kw) < 0) return false;
+      return true;
+    });
+    var body = list.length ? list.map(function (o) {
+      var first = P(o.items[0].productId);
+      var actions = "<button class=\"btn btn-sm\" data-detail=\"" + o.orderNo + "\">详情</button>";
+      if (o.status === "PENDING_SHIPMENT") {
+        actions += canShip
+          ? "<button class=\"btn btn-sm btn-primary\" data-ship=\"" + o.orderNo + "\">发货</button>"
+          : "<button class=\"btn btn-sm\" disabled title=\"客服角色无发货权限\">发货</button>";
+      }
+      if (canNote) actions += "<button class=\"btn btn-sm\" data-note=\"" + o.orderNo + "\">备注" + (o.notes.length ? "(" + o.notes.length + ")" : "") + "</button>";
+      return "<tr><td>" + o.orderNo + "</td><td>" + o.buyer + "</td>"
+        + "<td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(first.image) + "\" alt=\"\"><span>" + first.name
+        + (o.items.length > 1 ? "<br><span class=\"small faint\">等 " + o.items.length + " 件商品</span>" : "") + "</span></div></td>"
+        + "<td class=\"num price\">" + yuanPlain(o.payAmount) + "</td>"
+        + "<td>" + statusPill(o.status) + (o.source === "SECKILL" ? " <span class=\"tag tag-price\">秒杀</span>" : "") + "</td>"
+        + "<td class=\"small muted\">" + o.createdAt + "</td>"
+        + "<td><div class=\"table-actions\">" + actions + "</div></td></tr>";
+    }).join("") : "<tr><td colspan=\"6\"><div class=\"empty\"><i data-icon=\"package\" data-size=\"34\"></i><h4>没有符合条件的订单</h4></div></td></tr>";
+    document.getElementById("list").innerHTML = body;
+    document.getElementById("total").textContent = "共 " + list.length + " 笔订单";
+    bind();
+  }
+
+  function bind() {
+    document.querySelectorAll("[data-detail]").forEach(function (b) { b.onclick = function () { detail(b.dataset.detail); }; });
+    document.querySelectorAll("[data-ship]").forEach(function (b) { b.onclick = function () { ship(b.dataset.ship); }; });
+    document.querySelectorAll("[data-note]").forEach(function (b) { b.onclick = function () { note(b.dataset.note); }; });
+  }
+
+  function find(no) { return rows.filter(function (o) { return o.orderNo === no; })[0]; }
+
+  function detail(no) {
+    var o = find(no);
+    var itemsHTML = o.items.map(function (i) {
+      var p = P(i.productId);
+      return "<tr><td>" + p.name + "</td><td class=\"num\">" + yuanPlain(p.price) + "</td><td class=\"num\">x" + i.quantity + "</td>"
+        + "<td class=\"num price\">" + yuan(mul(p.price, i.quantity)) + "</td></tr>";
+    }).join("");
+    openModal(
+      "<dl class=\"dl\"><dt>订单号</dt><dd>" + o.orderNo + "</dd>"
+      + "<dt>买家</dt><dd>" + o.buyer + "（ID " + o.buyerId + "）</dd>"
+      + "<dt>下单时间</dt><dd>" + o.createdAt + "</dd>"
+      + "<dt>支付方式</dt><dd>" + (o.payType === "ALIPAY" ? "支付宝" : o.payType === "WECHAT" ? "微信支付" : "—") + (o.payTime ? " · " + o.payTime : "") + "</dd>"
+      + "<dt>收货信息</dt><dd>" + o.receiver + "</dd>"
+      + (o.trackingNo ? "<dt>运单号</dt><dd>" + o.trackingNo + "</dd>" : "")
+      + "<dt>订单备注</dt><dd>" + (o.notes.length ? o.notes.map(function (n) { return n.admin + "：" + n.content + "（" + n.at + "）"; }).join("<br>") : "无") + "</dd></dl>"
+      + "<table class=\"table mt16\"><thead><tr><th>商品</th><th class=\"num\">单价</th><th class=\"num\">数量</th><th class=\"num\">小计</th></tr></thead><tbody>"
+      + itemsHTML + "</tbody></table>"
+      + "<div class=\"amount-row total mt12\"><span class=\"strong\">实付金额</span><span class=\"price\">" + yuan(o.payAmount) + "</span></div>",
+      { title: "订单详情", footer: canShip && o.status === "PENDING_SHIPMENT"
+        ? "<button class=\"btn\" data-close>关闭</button><button class=\"btn btn-primary\" id=\"dShip\">发货</button>"
+        : "<button class=\"btn\" data-close>关闭</button>" });
+    var ds = document.getElementById("dShip");
+    if (ds) ds.onclick = function () { closeModal(); ship(no); };
+  }
+
+  function ship(no) {
+    if (!canShip) { toast("当前角色无发货权限（接口返回 403）", "err"); return; }
+    var o = find(no);
+    openModal("<div class=\"field\"><label>运单号</label><input class=\"input\" id=\"tn\" placeholder=\"请输入快递运单号\" value=\"SF" + String(Date.now()).slice(-10) + "\">"
+      + "<div class=\"hint\">本期只记录运单号，不做物流轨迹对接（需求 2.2）</div></div>",
+      { title: "订单发货 · " + no, footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"okShip\">确认发货</button>" });
+    document.getElementById("okShip").onclick = function () {
+      var tn = document.getElementById("tn").value.trim();
+      if (!tn) { toast("请填写运单号", "err"); return; }
+      o.trackingNo = tn; o.status = "PENDING_RECEIPT";
+      o.shipTime = new Date().toLocaleString("zh-CN", { hour12: false });
+      closeModal(); toast("发货成功，已通知买家", "ok"); render();
+    };
+  }
+
+  function note(no) {
+    if (!canNote) { toast("当前角色无备注权限（接口返回 403）", "err"); return; }
+    var o = find(no);
+    openModal("<div class=\"field\"><label>备注内容</label><textarea class=\"textarea\" id=\"nc\" maxlength=\"200\" placeholder=\"补充说明，例如买家电话沟通结果\"></textarea>"
+      + "<div class=\"hint\">客服仅可查询订单与添加备注，不可发货或退款（R5-Q3）</div></div>"
+      + (o.notes.length ? "<div class=\"mt16\"><div class=\"small faint mb8\">历史备注</div>" + o.notes.map(function (n) { return "<div class=\"small\">" + n.admin + "：" + n.content + " <span class=\"faint\">" + n.at + "</span></div>"; }).join("") + "</div>" : ""),
+      { title: "订单备注 · " + no, footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"okNote\">保存备注</button>" });
+    document.getElementById("okNote").onclick = function () {
+      var c = document.getElementById("nc").value.trim();
+      if (!c) { toast("请填写备注内容", "err"); return; }
+      o.notes.push({ admin: roleName() + " · " + DB.user.nickname, content: c, at: new Date().toLocaleString("zh-CN", { hour12: false }) });
+      closeModal(); toast("备注已保存", "ok"); render();
+    };
+  }
+
+  document.getElementById("content").innerHTML =
+    "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"package\" data-size=\"16\"></i>订单列表</h3><span class=\"small faint\" id=\"total\"></span></div>"
+    + "<div class=\"panel-body\">"
+    + "<div class=\"toolbar\"><input class=\"input\" id=\"kw\" placeholder=\"订单号 / 买家\">"
+    + "<select class=\"select\" id=\"st\">" + statusOptions() + "</select>"
+    + "<button class=\"btn\" id=\"search\"><i data-icon=\"search\" data-size=\"15\"></i>查询</button>"
+    + "<button class=\"btn btn-ghost\" id=\"reset\">重置</button>"
+    + "<span class=\"spacer\"></span>"
+    + "<span class=\"small faint\">当前角色：" + roleName() + (canShip ? " · 可发货" : " · 仅可查单与备注") + "</span></div>"
+    + "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>订单号</th><th>买家</th><th>商品</th><th class=\"num\">实付</th><th>状态</th><th>下单时间</th><th>操作</th></tr></thead>"
+    + "<tbody id=\"list\"></tbody></table></div></div></div>";
+  document.getElementById("search").onclick = function () { kw = document.getElementById("kw").value.trim(); st = document.getElementById("st").value; render(); };
+  document.getElementById("reset").onclick = function () { kw = ""; st = "ALL"; document.getElementById("kw").value = ""; document.getElementById("st").value = "ALL"; render(); };
+  document.getElementById("st").onchange = function () { st = this.value; render(); };
+  render();
+  mountIcons(document.getElementById("content"));
+}
+</script>
+</body>
+</html>

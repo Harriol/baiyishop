@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品管理 · 百益后台</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/admin-shell.js"></script>
+<script>
+if (adminShell("products", { title: "商品管理", crumb: "商品", perm: "product" })) {
+  var kw = "", fCat = 0, fBrand = 0, fStatus = "ALL";
+  function render() {
+    var list = DB.products.filter(function (p) {
+      if (kw && p.name.indexOf(kw) < 0) return false;
+      if (fCat && catIds(fCat).indexOf(p.categoryId) < 0) return false;
+      if (fBrand && p.brandId !== fBrand) return false;
+      if (fStatus !== "ALL" && p.status !== fStatus) return false;
+      return true;
+    });
+    document.getElementById("list").innerHTML = list.length ? list.map(function (p) {
+      var brand = DB.brands.filter(function (b) { return b.id === p.brandId; })[0] || {};
+      var chain = catPath(p.categoryId).map(function (c) { return c.name; }).join(" / ");
+      var on = p.status === "ON_SALE";
+      return "<tr><td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.image) + "\" alt=\"\">"
+        + "<span>" + p.name + "<br><span class=\"small faint\">SKU " + p.id + "-01</span></span></div></td>"
+        + "<td class=\"small muted\">" + chain + "</td><td>" + (brand.name || "—") + "</td>"
+        + "<td class=\"num price\">" + yuanPlain(p.price) + "</td>"
+        + "<td class=\"num\"" + (p.stock <= 10 ? " style=\"color:var(--price);font-weight:600\"" : "") + ">" + p.stock + "</td>"
+        + "<td>" + (on ? "<span class=\"pill pill-done\">已上架</span>" : "<span class=\"pill pill-cancel\">已下架</span>") + "</td>"
+        + "<td><div class=\"table-actions\"><a class=\"btn btn-sm\" href=\"product-edit.html?id=" + p.id + "\">编辑</a>"
+        + "<button class=\"btn btn-sm\" data-toggle=\"" + p.id + "\">" + (on ? "下架" : "上架") + "</button>"
+        + "<button class=\"btn btn-sm\" data-del=\"" + p.id + "\">删除</button></div></td></tr>";
+    }).join("") : "<tr><td colspan=\"7\"><div class=\"empty\"><i data-icon=\"layout-grid\" data-size=\"34\"></i><h4>没有符合条件的商品</h4></div></td></tr>";
+    document.getElementById("total").textContent = "共 " + list.length + " 个商品";
+    document.querySelectorAll("[data-toggle]").forEach(function (b) {
+      b.onclick = function () {
+        var p = P(Number(b.dataset.toggle));
+        p.status = p.status === "ON_SALE" ? "OFF_SALE" : "ON_SALE";
+        toast(p.status === "ON_SALE" ? "已上架，前台可见" : "已下架，前台不可见", "ok");
+        render();
+      };
+    });
+    document.querySelectorAll("[data-del]").forEach(function (b) {
+      b.onclick = function () {
+        var p = P(Number(b.dataset.del));
+        openModal("<p>确定删除商品「" + p.name + "」？</p><div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>删除为逻辑删除（deleted = 1），与下架语义分离；历史订单仍会展示商品快照。</div>",
+          { title: "删除商品", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"okDel\">确认删除</button>" });
+        document.getElementById("okDel").onclick = function () { closeModal(); toast("已删除（逻辑删除）", "ok"); };
+      };
+    });
+  }
+
+  document.getElementById("content").innerHTML =
+    "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"layout-grid\" data-size=\"16\"></i>商品列表</h3>"
+    + "<div class=\"inline\"><span class=\"small faint\" id=\"total\"></span><a class=\"btn btn-primary btn-sm\" href=\"product-edit.html\"><i data-icon=\"plus\" data-size=\"14\"></i>新增商品</a></div></div>"
+    + "<div class=\"panel-body\"><div class=\"toolbar\">"
+    + "<input class=\"input\" id=\"kw\" placeholder=\"商品名称\">"
+    + "<select class=\"select\" id=\"cat\"><option value=\"0\">全部分类</option>"
+    + catTree().map(function (c) { return "<option value=\"" + c.id + "\">" + c.name + "</option>"; }).join("") + "</select>"
+    + "<select class=\"select\" id=\"brand\"><option value=\"0\">全部品牌</option>"
+    + DB.brands.map(function (b) { return "<option value=\"" + b.id + "\">" + b.name + "</option>"; }).join("") + "</select>"
+    + "<select class=\"select\" id=\"status\"><option value=\"ALL\">全部状态</option><option value=\"ON_SALE\">已上架</option><option value=\"OFF_SALE\">已下架</option></select>"
+    + "<button class=\"btn\" id=\"search\"><i data-icon=\"search\" data-size=\"15\"></i>查询</button>"
+    + "<button class=\"btn btn-ghost\" id=\"reset\">重置</button></div>"
+    + "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th>分类</th><th>品牌</th><th class=\"num\">价格</th><th class=\"num\">库存</th><th>状态</th><th>操作</th></tr></thead><tbody id=\"list\"></tbody></table></div></div></div>";
+  document.getElementById("search").onclick = function () {
+    kw = document.getElementById("kw").value.trim();
+    fCat = Number(document.getElementById("cat").value);
+    fBrand = Number(document.getElementById("brand").value);
+    fStatus = document.getElementById("status").value; render();
+  };
+  document.getElementById("reset").onclick = function () {
+    kw = ""; fCat = 0; fBrand = 0; fStatus = "ALL";
+    ["kw", "cat", "brand", "status"].forEach(function (id) { document.getElementById(id).value = id === "status" ? "ALL" : (id === "kw" ? "" : "0"); });
+    render();
+  };
+  render();
+  mountIcons(document.getElementById("content"));
+}
+</script>
+</body>
+</html>

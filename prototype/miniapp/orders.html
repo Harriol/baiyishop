@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的订单 · 百益商城小程序</title>
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="assets/mini.css">
+</head>
+<body>
+
+<script src="../assets/js/icons.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="assets/mini-shell.js"></script>
+<script>
+var body = miniShell({ title: "我的订单", back: "profile.html", tabs: false });
+var cur = qs("status", "ALL");
+var TABS = [["ALL", "全部"], ["PENDING_PAYMENT", "待付款"], ["PENDING_SHIPMENT", "待发货"], ["PENDING_RECEIPT", "待收货"], ["COMPLETED", "已完成"], ["CANCELLED", "已取消"]];
+function actions(o) {
+  if (o.status === "PENDING_PAYMENT") return "<button class=\"m-btn price\" style=\"height:30px;font-size:12px\" data-pay=\"" + o.orderNo + "\">立即支付</button>";
+  if (o.status === "PENDING_RECEIPT") return "<button class=\"m-btn\" style=\"height:30px;font-size:12px\" data-recv=\"" + o.orderNo + "\">确认收货</button>";
+  if (o.status === "COMPLETED") return "<button class=\"m-btn plain\" style=\"height:30px;font-size:12px\" data-again=\"" + o.orderNo + "\">再次购买</button>";
+  if (o.status === "CANCELLED") return "<button class=\"m-btn plain\" style=\"height:30px;font-size:12px\" data-again=\"" + o.orderNo + "\">再次购买</button>";
+  return "<span class=\"small faint\">等待商家发货</span>";
+}
+function render() {
+  var list = DB.orders.filter(function (o) { return cur === "ALL" || o.status === cur; });
+  body.innerHTML = "<div style=\"padding:8px 8px 0;display:flex;gap:6px;overflow-x:auto;background:var(--surface)\" id=\"tabs\">"
+    + TABS.map(function (t) {
+        return "<button class=\"m-tag\" data-t=\"" + t[0] + "\" style=\"flex:none;padding:5px 10px;border:0;"
+          + (t[0] === cur ? "background:var(--brand-tint);color:var(--brand-dark);font-weight:600" : "") + "\">" + t[1] + "</button>";
+      }).join("") + "</div>"
+    + "<div style=\"padding:10px 12px\">" + (list.length ? list.map(function (o) {
+        var first = P(o.items[0].productId);
+        return "<div style=\"background:var(--surface);border-radius:10px;margin-bottom:10px;overflow:hidden\">"
+          + "<div class=\"row\" style=\"padding:9px 12px;border-bottom:1px solid var(--line-2)\"><span class=\"small faint\">" + o.orderNo + "</span>"
+          + "<span style=\"margin-left:auto\">" + statusPill(o.status) + "</span></div>"
+          + "<div class=\"m-row\" style=\"border:0\"><img class=\"pic\" src=\"" + img(first.image) + "\" alt=\"\">"
+          + "<div class=\"grow\"><div class=\"nm clamp2\" style=\"font-size:12.5px\">" + first.name + "</div>"
+          + "<div class=\"small faint mt8\">共 " + o.items.reduce(function (s, i) { return s + i.quantity; }, 0) + " 件</div></div>"
+          + "<span style=\"color:var(--price);font-weight:700\">" + yuanPlain(o.payAmount) + "</span></div>"
+          + "<div class=\"row\" style=\"padding:8px 12px;border-top:1px solid var(--line-2);gap:8px;justify-content:flex-end\">" + actions(o) + "</div></div>";
+      }).join("") : "<div class=\"empty\" style=\"padding-top:70px\"><i data-icon=\"package\" data-size=\"38\"></i><h4>暂无相关订单</h4></div>") + "</div>";
+  body.querySelectorAll("[data-t]").forEach(function (b) { b.onclick = function () { cur = b.dataset.t; render(); }; });
+  body.querySelectorAll("[data-pay]").forEach(function (b) { b.onclick = function () { location.href = "../pay.html"; }; });
+  body.querySelectorAll("[data-recv]").forEach(function (b) { b.onclick = function () {
+    DB.orders.filter(function (o) { return o.orderNo === b.dataset.recv; })[0].status = "COMPLETED"; toast("确认收货成功", "ok"); render(); }; });
+  body.querySelectorAll("[data-again]").forEach(function (b) { b.onclick = function () { toast("已加入购物车", "ok"); }; });
+  mountMiniIcons(body);
+}
+render();
+</script>
+</body>
+</html>
