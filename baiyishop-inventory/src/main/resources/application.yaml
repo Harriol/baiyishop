@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: baiyishop-inventory
+  profiles:
+    # 本地数据库口令等敏感配置放在 application-local.yaml（已被 .gitignore 忽略）
+    default: local
+  config:
+    import: optional:classpath:application-local.yaml
   threads:
     virtual:
       enabled: true
@@ -14,6 +19,36 @@ spring:
         server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 本地开发使用 public 命名空间；不同环境用 namespace 隔离
         namespace: ${NACOS_NAMESPACE:}
+
+  # 数据源：本服务只连自己的 schema（docs/adr/ADR-007），账号无跨库权限
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:baiyishop_inventory}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: ${DB_USERNAME:baiyi_inventory}
+    password: ${DB_PASSWORD:}
+    hikari:
+      pool-name: baiyishop-inventory-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+
+  # 表结构由 Flyway 管理，禁止手工改表（docs/database.md 1.6）
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
 
 management:
   endpoints:
