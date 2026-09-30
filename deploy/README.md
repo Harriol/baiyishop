@@ -36,8 +36,8 @@ docker compose --env-file .env -f docker-compose.middleware.yml up -d
 | 目的 | 命令 |
 | --- | --- |
 | 查看状态 | `docker compose --env-file .env -f docker-compose.middleware.yml ps` |
-| 只看日志 | `docker compose --env-file .env -f docker-compose.middleware.yml logs -f mysql` |
-| 分阶段启动 | `... up -d mysql redis nacos`（内存紧张时先起这三个） |
+| 只看日志 | `docker compose --env-file .env -f docker-compose.middleware.yml logs -f nacos` |
+| 分阶段启动 | `... up -d redis nacos`（内存紧张时先起这两个） |
 | 停止（保留数据） | `... down` |
 | 停止并删除数据 | `... down -v`（谨慎） |
 
@@ -45,7 +45,7 @@ docker compose --env-file .env -f docker-compose.middleware.yml up -d
 
 | 服务 | 容器名 | 端口 | 用途 |
 | --- | --- | --- | --- |
-| MySQL 8.0 | `baiyishop-mysql` | **3307**（容器内 3306） | 6 个 schema，账号按 schema 授权（ADR-007）。宿主 3306 被本机原生 MySQL 服务占用，故映射到 3307 |
+| MySQL 8.0 | 本机原生（非容器） | **3306** | 项目默认连它。容器版为可选：`baiyishop-mysql`，映射 3307 |
 | Redis 7 | `baiyishop-redis` | 6379 | 缓存、秒杀预扣（开启 AOF，ADR-008） |
 | Nacos 2.4.3 | `baiyishop-nacos` | 8848 / 9848 | 注册与配置中心（REQ-1002） |
 | RocketMQ 5.3.1 | `baiyishop-rocketmq-namesrv` / `-broker` | 9876 / 10911 | 本地消息表投递与延时消息 |
@@ -54,7 +54,8 @@ docker compose --env-file .env -f docker-compose.middleware.yml up -d
 
 ## 数据库账号
 
-首次启动时 `mysql/init/01-create-schemas-and-users.sh` 会创建 6 个 schema 及各自的专用账号：
+无论用原生 MySQL（`init-native.ps1`）还是容器版（首次启动执行 `mysql/init/01-create-schemas-and-users.sh`），
+都会创建下列 6 个 schema 及各自的专用账号：
 
 | schema | 账号 |
 | --- | --- |
@@ -71,14 +72,15 @@ docker compose --env-file .env -f docker-compose.middleware.yml up -d
 
 | 中间件 | 容器内端口 | 宿主端口 | 说明 |
 | --- | --- | --- | --- |
-| MySQL | 3306 | **3307** | 宿主 3306 已被本机原生 MySQL 服务占用，容器改映射 3307 |
+| MySQL（容器版，可选） | 3306 | **3307** | 仅在 `--profile docker-mysql` 时启动；避开原生 MySQL 的 3306 |
 | Redis | 6379 | 6379 | — |
 | Nacos | 8848 / 9848 | 8848 / 9848 | — |
 | RocketMQ | 9876 / 10911 | 9876 / 10911 | — |
 | Elasticsearch | 9200 | 9200 | — |
 | MinIO | 9000 / 9001 | 9000 / 9001 | — |
 
-服务连接串请使用**宿主端口**（如 `jdbc:mysql://localhost:3307/baiyishop_user`）。
+项目默认连接本机原生 MySQL：`jdbc:mysql://localhost:3306/baiyishop_user`。
+若启用容器版 MySQL，则端口改为 3307。
 
 ## 本地开发的简化项（不要带到线上）
 
@@ -102,4 +104,6 @@ Docker 具名卷默认属主是 root，而 RocketMQ 容器以 `rocketmq`（uid 3
 - **ES 中文分词插件 ik 尚未安装**：GitHub 下载通道不通，暂用默认分词器。做搜索服务前需补上（离线安装插件包或自建镜像）。
 - **Seata 尚未纳入编排**：接入全局事务时再补 `seata-server`。
 - 首次启动会执行 `mysql/init/01-create-schemas-and-users.sh`；若需重新初始化，用 `down -v` 删除数据卷后再起。
+- 原生 MySQL 初始化已实测：6 个 schema 为 utf8mb4/utf8mb4_0900_ai_ci，每个账号只被授权自己的 schema，
+  越权访问其他 schema 返回 1044/1142，且不影响库中已有的其他数据库。
 - 内存占用：Docker VM 配额建议不低于 6 GB；若机器紧张，可分阶段启动（先 `mysql redis nacos`）。
