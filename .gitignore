@@ -36,3 +36,7 @@ out/
 ### VS Code ###
 .vscode/
 /docs/
+
+### 环境变量与密钥（模板 .env.example 保留在仓库中）###
+.env
+!.env.example
