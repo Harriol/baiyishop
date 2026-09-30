@@ -9,6 +9,9 @@ dependencies {
     implementation(platform(libs.spring.cloud.alibaba.bom))
 
     implementation(project(":baiyishop-common-web"))
+    // 注册中心：服务在 Nacos 可见（REQ-1002）
+    implementation(libs.nacos.discovery)
+
     implementation(libs.boot.actuator)
 
     testImplementation(libs.boot.test)

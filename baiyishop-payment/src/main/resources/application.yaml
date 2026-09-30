@@ -7,6 +7,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  cloud:
+    nacos:
+      # 注册中心地址；可用环境变量覆盖（容器内运行时指向 nacos 服务名）
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+        # 本地开发使用 public 命名空间；不同环境用 namespace 隔离
+        namespace: ${NACOS_NAMESPACE:}
 
 management:
   endpoints:
