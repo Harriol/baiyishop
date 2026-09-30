@@ -1,12 +1,11 @@
-# 百益商城 · 在**本机原生 MySQL** 上初始化 6 个 schema 与专用账号
+﻿# 百益商城 · 在**本机原生 MySQL** 上初始化 6 个 schema 与专用账号
 # 依据 docs/database.md 2 章与 docs/adr/ADR-007（账号按 schema 授权，阻止跨库访问）
 #
-# 用法：
-#   .\init-native.ps1 -RootPassword '你的root密码'
+# 用法：.\init-native.ps1 -RootPassword '你的root密码'
 # 说明：
 #   - 幂等：全部使用 CREATE ... IF NOT EXISTS，可重复执行
 #   - 只创建/授权本项目的 6 个 schema，不触碰其他已有数据库
-#   - 客户端优先取本机 MySQL 安装目录下的 mysql.exe，其次取 PATH 中的 mysql
+#   - 本文件必须保存为 UTF-8 with BOM，否则 Windows PowerShell 5.1 会按 ANSI 解析导致乱码
 
 param(
     [string]$HostName = "127.0.0.1",
@@ -46,25 +45,27 @@ foreach ($s in $schemas) {
 $mysqlExe = if (Test-Path $ClientPath) { $ClientPath } else { (Get-Command mysql -ErrorAction SilentlyContinue).Source }
 if (-not $mysqlExe) { throw "未找到 mysql 客户端，请用 -ClientPath 指定路径" }
 Write-Host "使用客户端: $mysqlExe"
-Write-Host "目标服务器: $HostName:$Port"
+Write-Host ("目标服务器: {0}:{1}" -f $HostName, $Port)
 
-# ---- 生成并执行 SQL ----
-$sb = New-Object System.Text.StringBuilder
-[void]$sb.AppendLine("SET NAMES utf8mb4;")
+# ---- 生成 SQL 并执行（schema 名不含特殊字符，无需反引号）----
+$sql = New-Object System.Collections.Generic.List[string]
+$sql.Add("SET NAMES utf8mb4;")
 foreach ($s in $schemas) {
-    [void]$sb.AppendLine("CREATE DATABASE IF NOT EXISTS \`$($s.db)\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;")
-    [void]$sb.AppendLine("CREATE USER IF NOT EXISTS '$($s.user)'@'%' IDENTIFIED BY '$($s.pwd)';")
-    [void]$sb.AppendLine("CREATE USER IF NOT EXISTS '$($s.user)'@'localhost' IDENTIFIED BY '$($s.pwd)';")
-    [void]$sb.AppendLine("GRANT ALL PRIVILEGES ON \`$($s.db)\`.* TO '$($s.user)'@'%';")
-    [void]$sb.AppendLine("GRANT ALL PRIVILEGES ON \`$($s.db)\`.* TO '$($s.user)'@'localhost';")
+    $sql.Add("CREATE DATABASE IF NOT EXISTS $($s.db) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;")
+    $sql.Add("CREATE USER IF NOT EXISTS '$($s.user)'@'%' IDENTIFIED BY '$($s.pwd)';")
+    $sql.Add("CREATE USER IF NOT EXISTS '$($s.user)'@'localhost' IDENTIFIED BY '$($s.pwd)';")
+    $sql.Add("GRANT ALL PRIVILEGES ON $($s.db).* TO '$($s.user)'@'%';")
+    $sql.Add("GRANT ALL PRIVILEGES ON $($s.db).* TO '$($s.user)'@'localhost';")
 }
-[void]$sb.AppendLine("FLUSH PRIVILEGES;")
+$sql.Add("FLUSH PRIVILEGES;")
 
-$env:MYSQL_PWD = $RootPassword   # 避免密码出现在进程命令行里
+# 用 MYSQL_PWD 传密码，避免出现在进程命令行里
+$env:MYSQL_PWD = $RootPassword
 try {
-    $sb.ToString() | & $mysqlExe -h $HostName -P $Port -u $RootUser --default-character-set=utf8mb4
+    $sql -join [Environment]::NewLine | & $mysqlExe -h $HostName -P $Port -u $RootUser --default-character-set=utf8mb4
     if ($LASTEXITCODE -ne 0) { throw "mysql 客户端返回码 $LASTEXITCODE" }
-} finally {
+}
+finally {
     Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
 }
 
