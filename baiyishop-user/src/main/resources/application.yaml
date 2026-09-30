@@ -32,6 +32,13 @@ spring:
       minimum-idle: 2
       connection-timeout: 5000
 
+  # Redis：登录失败计数、令牌黑名单（docs/architecture.md 7.1）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
   # 表结构由 Flyway 管理，禁止手工改表（docs/database.md 1.6）
   flyway:
     enabled: true
