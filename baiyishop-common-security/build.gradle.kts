@@ -17,6 +17,11 @@ dependencies {
     runtimeOnly(libs.jjwt.impl)
     runtimeOnly(libs.jjwt.jackson)
 
+    // 密码加盐哈希：只用 BCrypt 实现，不引入完整 Spring Security（最小依赖原则）
+    api(libs.spring.security.crypto)
+
     compileOnly(libs.boot.webmvc)
+    compileOnly(libs.boot.starter.json)
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")
+    annotationProcessor("org.springframework.boot:spring-boot-autoconfigure-processor")
 }

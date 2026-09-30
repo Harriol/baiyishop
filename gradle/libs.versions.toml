@@ -21,6 +21,8 @@ boot-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
 boot-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
 boot-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 boot-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+# 注意：Boot 4 的 spring-boot-starter-webmvc 不再自带 Jackson，需要单独引入本 starter
+boot-starter-json = { module = "org.springframework.boot:spring-boot-starter-json" }
 boot-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 boot-data-elasticsearch = { module = "org.springframework.boot:spring-boot-starter-data-elasticsearch" }
 boot-test = { module = "org.springframework.boot:spring-boot-starter-test" }
@@ -50,6 +52,7 @@ seata-spring-boot-starter = { module = "io.seata:seata-spring-boot-starter", ver
 rocketmq-spring-boot-starter = { module = "org.apache.rocketmq:rocketmq-spring-boot-starter", version.ref = "rocketmq-spring" }
 
 # --- 安全 ---
+spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }
 jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
 jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }

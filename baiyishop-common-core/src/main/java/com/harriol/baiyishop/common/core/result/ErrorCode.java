@@ -14,7 +14,18 @@ public enum ErrorCode {
     FORBIDDEN(10003, "无权限执行该操作", 403),
     NOT_FOUND(10004, "请求的资源不存在", 404),
     TOO_MANY_REQUESTS(10005, "操作过于频繁，请稍后再试", 429),
-    SYSTEM_ERROR(10006, "系统繁忙，请稍后重试", 500);
+    SYSTEM_ERROR(10006, "系统繁忙，请稍后重试", 500),
+
+    // ---- 2xxxx 用户与账号 ----
+    USER_CREDENTIALS_INVALID(20001, "账号或密码错误", 200),
+    USER_ACCOUNT_LOCKED(20002, "账号已锁定，请 10 分钟后重试", 200),
+    USER_ALREADY_EXISTS(20003, "该账号已被注册", 200),
+    USER_DISABLED(20004, "账号已被停用", 200),
+    USER_WECHAT_AUTH_FAILED(20005, "微信授权失败，请重试", 200),
+    USER_ADDRESS_NOT_FOUND(20006, "收货地址不存在", 200),
+    USER_ADDRESS_FORBIDDEN(20007, "收货地址不存在或不属于当前用户", 200),
+    ADMIN_CREDENTIALS_INVALID(20008, "账号或密码错误", 200),
+    ADMIN_DISABLED(20009, "账号已被停用", 200);
 
     private final int code;
     private final String message;
