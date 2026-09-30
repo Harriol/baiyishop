@@ -1,5 +1,6 @@
 package com.harriol.baiyishop.user;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -8,6 +9,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * <p>模块与端口划分见 docs/architecture.md 2.2。
  */
 @SpringBootApplication
+@MapperScan("com.harriol.baiyishop.user.mapper")
 public class UserApplication {
 
     public static void main(String[] args) {

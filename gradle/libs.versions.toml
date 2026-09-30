@@ -34,6 +34,13 @@ loadbalancer = { module = "org.springframework.cloud:spring-cloud-starter-loadba
 openfeign = { module = "org.springframework.cloud:spring-cloud-starter-openfeign" }
 gateway-webflux = { module = "org.springframework.cloud:spring-cloud-starter-gateway-server-webflux" }
 
+# --- 数据库迁移 ---
+# 注意：Spring Boot 4 把自动装配拆成了按技术分模块的 jar，
+# 只加 flyway-core 不会触发迁移，必须用 starter（它才带 spring-boot-flyway）
+boot-starter-flyway = { module = "org.springframework.boot:spring-boot-starter-flyway" }
+flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
+mysql-connector-j = { module = "com.mysql:mysql-connector-j" }
+
 # --- 持久层 ---
 mybatis-plus-spring-boot4-starter = { module = "com.baomidou:mybatis-plus-spring-boot4-starter", version.ref = "mybatis-plus" }
 mybatis-plus-jsqlparser = { module = "com.baomidou:mybatis-plus-jsqlparser", version.ref = "mybatis-plus" }

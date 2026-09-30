@@ -17,4 +17,5 @@ dependencies {
     api(libs.mybatis.plus.jsqlparser)
 
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")
+    annotationProcessor("org.springframework.boot:spring-boot-autoconfigure-processor")
 }

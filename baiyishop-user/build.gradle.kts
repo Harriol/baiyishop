@@ -9,10 +9,18 @@ dependencies {
     implementation(platform(libs.spring.cloud.alibaba.bom))
 
     implementation(project(":baiyishop-common-web"))
+    // 持久层：MyBatis-Plus 基础配置 + 防全表更新拦截（ADR-006）
+    implementation(project(":baiyishop-common-data"))
+
     // 注册中心：服务在 Nacos 可见（REQ-1002）
     implementation(libs.nacos.discovery)
 
     implementation(libs.boot.actuator)
+
+    // 数据库：驱动 + Flyway 迁移（docs/database.md 1.6）
+    runtimeOnly(libs.mysql.connector.j)
+    implementation(libs.boot.starter.flyway)
+    runtimeOnly(libs.flyway.mysql)
 
     testImplementation(libs.boot.test)
 }

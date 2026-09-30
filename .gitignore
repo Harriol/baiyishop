@@ -40,3 +40,5 @@ out/
 ### 环境变量与密钥（模板 .env.example 保留在仓库中）###
 .env
 !.env.example
+# 各服务的本地配置（含数据库口令），由 deploy/generate-local-config.ps1 生成
+application-local.yaml
