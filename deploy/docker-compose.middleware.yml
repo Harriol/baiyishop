@@ -1,0 +1,216 @@
+# 百益商城 · 中间件编排（本地开发环境）
+# 端口分配见 docs/architecture.md 2.4；启动方式见 deploy/README.md
+#
+# 全部启动：  docker compose --env-file .env -f docker-compose.middleware.yml up -d
+# 分阶段启动：docker compose --env-file .env -f docker-compose.middleware.yml up -d mysql redis nacos
+# 查看状态：  docker compose --env-file .env -f docker-compose.middleware.yml ps
+# 停止：      docker compose --env-file .env -f docker-compose.middleware.yml down
+# 连同数据：  ... down -v   （会删除全部中间件数据，谨慎）
+
+name: baiyishop
+
+services:
+
+  # ==================== MySQL（可选） ====================
+  # 默认**不使用**本容器：本地已安装原生 MySQL 8.0 并占用 3306，项目直接连它。
+  # 如需用容器版 MySQL，加 --profile docker-mysql：
+  #   docker compose --env-file .env -f docker-compose.middleware.yml --profile docker-mysql up -d
+  # 容器版映射到宿主 3307，避免与原生 MySQL 冲突。
+  # 6 个 schema：baiyishop_user / product / inventory / order / payment / seckill
+  # 账号按 schema 授权，从权限层阻止跨库访问（docs/adr/ADR-007）
+  mysql:
+    profiles: ["docker-mysql"]
+    image: mysql:8.0
+    container_name: baiyishop-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+      - --max-connections=500
+      - --innodb-buffer-pool-size=256M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请先复制 deploy/.env.example 为 deploy/.env}
+      MYSQL_PWD_USER: ${MYSQL_PWD_USER:-Baiyi@User2026}
+      MYSQL_PWD_PRODUCT: ${MYSQL_PWD_PRODUCT:-Baiyi@Product2026}
+      MYSQL_PWD_INVENTORY: ${MYSQL_PWD_INVENTORY:-Baiyi@Inventory2026}
+      MYSQL_PWD_ORDER: ${MYSQL_PWD_ORDER:-Baiyi@Order2026}
+      MYSQL_PWD_PAYMENT: ${MYSQL_PWD_PAYMENT:-Baiyi@Payment2026}
+      MYSQL_PWD_SECKILL: ${MYSQL_PWD_SECKILL:-Baiyi@Seckill2026}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_CONTAINER_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  # ==================== Redis ====================
+  # 开启 AOF：秒杀预扣与库存缓存需要可恢复（docs/adr/ADR-008）
+  redis:
+    image: redis:7-alpine
+    container_name: baiyishop-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  # ==================== Nacos ====================
+  # 注册中心 + 配置中心（REQ-1002）；standalone 模式使用内嵌存储，适合本地开发
+  nacos:
+    image: nacos/nacos-server:v2.4.3
+    container_name: baiyishop-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_ENABLE: "false"   # 本地开发关闭鉴权；部署到公网前必须开启并配置 token
+      TZ: Asia/Shanghai
+    ports:
+      - "${NACOS_PORT:-8848}:8848"
+      - "9848:9848"
+    volumes:
+      - nacos-data:/home/nacos/data
+      - nacos-logs:/home/nacos/logs
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  # ==================== RocketMQ ====================
+  # 本地消息表投递 + 延时消息（超时取消 / 自动确认收货）见 docs/architecture.md 4.2、6.3
+  # 一次性初始化：具名卷默认属主是 root，而 RocketMQ 以 rocketmq(uid 3000) 运行，
+  # 不改属主会导致 broker 写不进 store 目录、启动即失败。此容器只做 chown 后退出。
+  rocketmq-init:
+    image: alpine:3.20
+    container_name: baiyishop-rocketmq-init
+    user: root
+    command: sh -c "mkdir -p /store /broker-logs /namesrv-logs && chown -R 3000:3000 /store /broker-logs /namesrv-logs && echo '[baiyishop-init] RocketMQ 卷属主已设为 3000:3000'"
+    volumes:
+      - rocketmq-broker-store:/store
+      - rocketmq-broker-logs:/broker-logs
+      - rocketmq-namesrv-logs:/namesrv-logs
+    restart: "no"
+    networks: [baiyishop-net]
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.1
+    container_name: baiyishop-rocketmq-namesrv
+    depends_on:
+      rocketmq-init:
+        condition: service_completed_successfully
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m"
+      TZ: Asia/Shanghai
+    ports:
+      - "${ROCKETMQ_NAMESRV_PORT:-9876}:9876"
+    volumes:
+      - rocketmq-namesrv-logs:/home/rocketmq/rocketmq-5.3.1/logs
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.1
+    container_name: baiyishop-rocketmq-broker
+    depends_on:
+      rocketmq-init:
+        condition: service_completed_successfully
+      rocketmq-namesrv:
+        condition: service_started
+    command: sh mqbroker -c /home/rocketmq/conf/broker.conf
+    environment:
+      NAMESRV_ADDR: baiyishop-rocketmq-namesrv:9876
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn256m"
+      TZ: Asia/Shanghai
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
+      - rocketmq-broker-store:/home/rocketmq/store
+      - rocketmq-broker-logs:/home/rocketmq/rocketmq-5.3.1/logs
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  # ==================== Elasticsearch ====================
+  # 商品检索（REQ-301）；中文分词插件 ik 待接入，见 deploy/README.md 已知事项
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: baiyishop-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"   # 本地开发关闭安全；生产必须开启
+      xpack.license.self_generated.type: basic
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      TZ: Asia/Shanghai
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+  # ==================== MinIO ====================
+  # 商品图片对象存储（R5-Q4）
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: baiyishop-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-baiyishop}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请先复制 deploy/.env.example 为 deploy/.env}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
+networks:
+  baiyishop-net:
+    name: baiyishop-net
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  nacos-data:
+  nacos-logs:
+  rocketmq-namesrv-logs:
+  rocketmq-broker-store:
+  rocketmq-broker-logs:
+  es-data:
+  minio-data:
