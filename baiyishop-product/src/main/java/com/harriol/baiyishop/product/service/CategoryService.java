@@ -135,6 +135,22 @@ public class CategoryService {
         return CategoryResponse.of(category);
     }
 
+    /**
+     * 返回「自身 + 全部后代」的分类 ID。
+     * <p>前台按一级分类浏览时要把三级分类下的商品都带出来（REQ-205），
+     * 靠物化路径前缀匹配实现，避免递归查库。
+     */
+    public List<Long> selfAndDescendantIds(Long categoryId) {
+        Category category = require(categoryId);
+        List<Long> ids = new ArrayList<>();
+        ids.add(category.getId());
+        categoryMapper.selectList(Wrappers.<Category>lambdaQuery()
+                        .likeRight(Category::getPath, category.getPath())
+                        .ne(Category::getId, category.getId()))
+                .forEach(child -> ids.add(child.getId()));
+        return ids;
+    }
+
     private Category require(Long id) {
         Category category = categoryMapper.selectById(id);
         if (category == null) {

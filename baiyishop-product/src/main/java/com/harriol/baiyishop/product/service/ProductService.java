@@ -7,6 +7,8 @@ import com.harriol.baiyishop.common.core.result.ErrorCode;
 import com.harriol.baiyishop.common.core.result.PageResult;
 import com.harriol.baiyishop.product.dto.ProductAdminItem;
 import com.harriol.baiyishop.product.dto.ProductDetailResponse;
+import com.harriol.baiyishop.product.dto.ProductListItem;
+import com.harriol.baiyishop.product.dto.ProductPublicDetail;
 import com.harriol.baiyishop.product.dto.ProductRequest;
 import com.harriol.baiyishop.product.dto.ProductSkuRequest;
 import com.harriol.baiyishop.product.dto.ProductSkuResponse;
@@ -56,17 +58,75 @@ public class ProductService {
     private final ProductImageMapper imageMapper;
     private final CategoryMapper categoryMapper;
     private final BrandMapper brandMapper;
+    private final CategoryService categoryService;
 
     public ProductService(ProductMapper productMapper,
                           ProductSkuMapper skuMapper,
                           ProductImageMapper imageMapper,
                           CategoryMapper categoryMapper,
-                          BrandMapper brandMapper) {
+                          BrandMapper brandMapper,
+                          CategoryService categoryService) {
         this.productMapper = productMapper;
         this.skuMapper = skuMapper;
         this.imageMapper = imageMapper;
         this.categoryMapper = categoryMapper;
         this.brandMapper = brandMapper;
+        this.categoryService = categoryService;
+    }
+
+    /**
+     * 前台分类商品列表（REQ-205）。
+     * <p>按分类**含子分类**查询，只返回上架商品；分类下没有商品时返回空列表而不是报错，
+     * 由前端展示空态。
+     *
+     * @param sort sales 销量 / new 上新 / price_asc / price_desc，默认按销量
+     */
+    public PageResult<ProductListItem> publicPage(Long categoryId, String sort, long page, long size) {
+        List<Long> categoryIds = categoryService.selfAndDescendantIds(categoryId);
+
+        Page<Product> pager = new Page<>(page, size);
+        var query = Wrappers.<Product>lambdaQuery()
+                .in(Product::getCategoryId, categoryIds)
+                .eq(Product::getStatus, Product.STATUS_ON_SALE);
+        switch (sort == null ? "sales" : sort) {
+            case "new" -> query.orderByDesc(Product::getOnSaleTime).orderByDesc(Product::getId);
+            case "price_asc" -> query.orderByAsc(Product::getMinPrice).orderByDesc(Product::getId);
+            case "price_desc" -> query.orderByDesc(Product::getMinPrice).orderByDesc(Product::getId);
+            default -> query.orderByDesc(Product::getSales).orderByDesc(Product::getId);
+        }
+        Page<Product> result = productMapper.selectPage(pager, query);
+
+        Map<Long, String> brandNames = namesOfBrands(result.getRecords().stream()
+                .map(Product::getBrandId).filter(java.util.Objects::nonNull).collect(Collectors.toSet()));
+        List<ProductListItem> items = result.getRecords().stream()
+                .map(p -> new ProductListItem(p.getId(), p.getName(), p.getMainImage(), p.getMinPrice(),
+                        p.getSales(), p.getCategoryId(), p.getBrandId(),
+                        p.getBrandId() == null ? null : brandNames.get(p.getBrandId())))
+                .toList();
+        return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), items);
+    }
+
+    /**
+     * 前台商品详情（REQ-206）。
+     * <p>已下架商品也返回 200 与 status=OFF_SALE，由前端给提示 —— 直接报错会让用户以为系统坏了。
+     * <p>库存字段恒为 null：本服务不存库存，待 inventory-service 就绪后只读接入。
+     */
+    public ProductPublicDetail publicDetail(Long id) {
+        Product product = require(id);
+        List<String> images = imageMapper.selectList(Wrappers.<ProductImage>lambdaQuery()
+                        .eq(ProductImage::getProductId, id).orderByAsc(ProductImage::getSort))
+                .stream().map(ProductImage::getUrl).toList();
+        List<ProductSkuResponse> skus = skusOf(id).stream()
+                .filter(sku -> sku.getStatus() != null && sku.getStatus() == 1)
+                .map(ProductSkuResponse::from).toList();
+
+        Category category = categoryMapper.selectById(product.getCategoryId());
+        Brand brand = product.getBrandId() == null ? null : brandMapper.selectById(product.getBrandId());
+        return new ProductPublicDetail(product.getId(), product.getName(), product.getCategoryId(),
+                category == null ? null : category.getName(), category == null ? null : category.getPath(),
+                product.getBrandId(), brand == null ? null : brand.getName(), product.getMainImage(),
+                images, product.getDetail(), product.getStatus(), product.getMinPrice(), product.getSales(),
+                null, skus, List.of());
     }
 
     /** 后台商品分页（关键词 / 分类 / 品牌 / 状态） */
