@@ -197,6 +197,13 @@ class SeckillPoolApiTests {
         Resp returned = send("POST", "/internal/inventory/seckill/return", body, null);
         assertThat(returned.json().get("data").get("remaining").asInt()).isZero();
         assertThat(availableOf(skuId)).isEqualTo(100);
+        // total 是划拨总量这一历史事实，不因回补而改变；
+        // 差额 total - remaining - sold 即已回补数量，因此不变量是 "<=" 而不是 "="
+        JsonNode poolAfter = returned.json().get("data");
+        assertThat(poolAfter.get("total").asInt()).isEqualTo(40);
+        assertThat(poolAfter.get("sold").asInt()).isZero();
+        assertThat(poolAfter.get("total").asInt() - poolAfter.get("remaining").asInt()
+                - poolAfter.get("sold").asInt()).isEqualTo(40);
 
         // 再回补一次：池内已无剩余，不产生副作用
         send("POST", "/internal/inventory/seckill/return", body, null);
