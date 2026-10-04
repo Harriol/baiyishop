@@ -37,6 +37,9 @@ out/
 .vscode/
 /docs/
 
+### ES 分词插件离线包（仅当将来手动换回 ik 时才需要，见 deploy/elasticsearch/README.md）###
+deploy/elasticsearch/*.zip
+
 ### 环境变量与密钥（模板 .env.example 保留在仓库中）###
 .env
 !.env.example

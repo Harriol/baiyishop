@@ -101,7 +101,7 @@ Docker 具名卷默认属主是 root，而 RocketMQ 容器以 `rocketmq`（uid 3
 
 ## 已知事项
 
-- **ES 中文分词插件 ik 尚未安装**：GitHub 下载通道不通，暂用默认分词器。做搜索服务前需补上（离线安装插件包或自建镜像）。
+- **ES 中文分词**：已改用官方 analysis-smartcn 并固化进自建镜像（`deploy/elasticsearch/`），无需手工装包。
 - **Seata 尚未纳入编排**：接入全局事务时再补 `seata-server`。
 - 首次启动会执行 `mysql/init/01-create-schemas-and-users.sh`；若需重新初始化，用 `down -v` 删除数据卷后再起。
 - 原生 MySQL 初始化已实测：6 个 schema 为 utf8mb4/utf8mb4_0900_ai_ci，每个账号只被授权自己的 schema，

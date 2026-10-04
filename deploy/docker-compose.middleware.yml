@@ -156,7 +156,10 @@ services:
   # ==================== Elasticsearch ====================
   # 商品检索（REQ-301）；中文分词插件 ik 待接入，见 deploy/README.md 已知事项
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    # 自建镜像以内置中文分词插件 smartcn（官方镜像不含分词器，见 elasticsearch/README.md）
+    build:
+      context: ./elasticsearch
+    image: baiyishop-elasticsearch:8.11.3-smartcn
     container_name: baiyishop-elasticsearch
     environment:
       discovery.type: single-node
