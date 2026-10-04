@@ -36,7 +36,11 @@ public enum ErrorCode {
     BRAND_IN_USE(30006, "该品牌已被商品引用，无法删除", 200),
     PRODUCT_NOT_FOUND(30007, "商品不存在", 200),
     PRODUCT_OFF_SALE(30008, "商品已下架", 200),
-    PARAM_ITEM_TEMPLATE_MISMATCH(30009, "参数项与所选模板不匹配", 200);
+    PARAM_ITEM_TEMPLATE_MISMATCH(30009, "参数项与所选模板不匹配", 200),
+    PARAM_TEMPLATE_NOT_FOUND(30010, "参数模板不存在", 200),
+    PARAM_ITEM_NOT_FOUND(30011, "参数项不存在", 200),
+    PARAM_ITEM_IN_USE(30012, "该参数项已被商品使用，无法删除", 200),
+    PARAM_TEMPLATE_IN_USE(30013, "该模板下存在参数项，无法删除", 200);
 
     private final int code;
     private final String message;

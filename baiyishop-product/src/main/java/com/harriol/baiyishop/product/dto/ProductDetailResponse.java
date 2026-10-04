@@ -12,5 +12,6 @@ import java.util.List;
 public record ProductDetailResponse(Long id, String name, Long categoryId, String categoryName,
                                     Long brandId, String brandName, String mainImage, List<String> images,
                                     String detail, String status, Long minPrice, Integer sales,
-                                    LocalDateTime onSaleTime, List<ProductSkuResponse> skus) {
+                                    LocalDateTime onSaleTime, List<ProductSkuResponse> skus,
+                                    List<ProductParamResponse> params) {
 }

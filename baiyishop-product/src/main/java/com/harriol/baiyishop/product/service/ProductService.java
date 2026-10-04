@@ -8,6 +8,8 @@ import com.harriol.baiyishop.common.core.result.PageResult;
 import com.harriol.baiyishop.product.dto.ProductAdminItem;
 import com.harriol.baiyishop.product.dto.ProductDetailResponse;
 import com.harriol.baiyishop.product.dto.ProductListItem;
+import com.harriol.baiyishop.product.dto.ProductParamRequest;
+import com.harriol.baiyishop.product.dto.ProductParamResponse;
 import com.harriol.baiyishop.product.dto.ProductPublicDetail;
 import com.harriol.baiyishop.product.dto.ProductRequest;
 import com.harriol.baiyishop.product.dto.ProductSkuRequest;
@@ -15,11 +17,15 @@ import com.harriol.baiyishop.product.dto.ProductSkuResponse;
 import com.harriol.baiyishop.product.entity.Brand;
 import com.harriol.baiyishop.product.entity.Category;
 import com.harriol.baiyishop.product.entity.Product;
+import com.harriol.baiyishop.product.entity.ParamItem;
 import com.harriol.baiyishop.product.entity.ProductImage;
+import com.harriol.baiyishop.product.entity.ProductParamValue;
 import com.harriol.baiyishop.product.entity.ProductSku;
 import com.harriol.baiyishop.product.mapper.BrandMapper;
 import com.harriol.baiyishop.product.mapper.CategoryMapper;
+import com.harriol.baiyishop.product.mapper.ParamItemMapper;
 import com.harriol.baiyishop.product.mapper.ProductImageMapper;
+import com.harriol.baiyishop.product.mapper.ProductParamValueMapper;
 import com.harriol.baiyishop.product.mapper.ProductMapper;
 import com.harriol.baiyishop.product.mapper.ProductSkuMapper;
 import org.slf4j.Logger;
@@ -59,19 +65,81 @@ public class ProductService {
     private final CategoryMapper categoryMapper;
     private final BrandMapper brandMapper;
     private final CategoryService categoryService;
+    private final ParamItemMapper paramItemMapper;
+    private final ProductParamValueMapper paramValueMapper;
 
     public ProductService(ProductMapper productMapper,
                           ProductSkuMapper skuMapper,
                           ProductImageMapper imageMapper,
                           CategoryMapper categoryMapper,
                           BrandMapper brandMapper,
-                          CategoryService categoryService) {
+                          CategoryService categoryService,
+                          ParamItemMapper paramItemMapper,
+                          ProductParamValueMapper paramValueMapper) {
         this.productMapper = productMapper;
         this.skuMapper = skuMapper;
         this.imageMapper = imageMapper;
         this.categoryMapper = categoryMapper;
         this.brandMapper = brandMapper;
         this.categoryService = categoryService;
+        this.paramItemMapper = paramItemMapper;
+        this.paramValueMapper = paramValueMapper;
+    }
+
+    /**
+     * 同步商品参数值（REQ-204）。
+     * <p>三条规则：
+     * <ul>
+     *   <li>参数项必须存在，否则 30011</li>
+     *   <li>同一商品的参数项必须来自**同一个模板**，否则 30009（后台统一维护参数口径）</li>
+     *   <li>product_param_value 没有 deleted 字段，是物理删除，可安全地「先清后插」</li>
+     * </ul>
+     */
+    private void syncParams(Product product, List<ProductParamRequest> params) {
+        paramValueMapper.delete(Wrappers.<ProductParamValue>lambdaQuery()
+                .eq(ProductParamValue::getProductId, product.getId()));
+        if (CollectionUtils.isEmpty(params)) {
+            return;
+        }
+        List<Long> itemIds = params.stream().map(ProductParamRequest::paramItemId).distinct().toList();
+        List<ParamItem> items = paramItemMapper.selectBatchIds(itemIds);
+        if (items.size() != itemIds.size()) {
+            throw new BizException(ErrorCode.PARAM_ITEM_NOT_FOUND);
+        }
+        long templateCount = items.stream().map(ParamItem::getTemplateId).distinct().count();
+        if (templateCount > 1) {
+            throw new BizException(ErrorCode.PARAM_ITEM_TEMPLATE_MISMATCH);
+        }
+        for (ProductParamRequest request : params) {
+            ParamItem item = items.stream()
+                    .filter(i -> i.getId().equals(request.paramItemId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BizException(ErrorCode.PARAM_ITEM_NOT_FOUND));
+            ProductParamValue value = new ProductParamValue();
+            value.setProductId(product.getId());
+            value.setParamItemId(item.getId());
+            value.setValue(request.value().trim());
+            value.setSort(item.getSort());
+            paramValueMapper.insert(value);
+        }
+    }
+
+    /** 读取商品参数，按参数项排序；参数项被删除时该条自动不再展示 */
+    private List<ProductParamResponse> paramsOf(Long productId) {
+        List<ProductParamValue> values = paramValueMapper.selectList(Wrappers.<ProductParamValue>lambdaQuery()
+                .eq(ProductParamValue::getProductId, productId)
+                .orderByAsc(ProductParamValue::getSort)
+                .orderByAsc(ProductParamValue::getId));
+        if (values.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, ParamItem> items = paramItemMapper
+                .selectBatchIds(values.stream().map(ProductParamValue::getParamItemId).distinct().toList())
+                .stream().collect(Collectors.toMap(ParamItem::getId, item -> item));
+        return values.stream()
+                .filter(value -> items.containsKey(value.getParamItemId()))
+                .map(value -> new ProductParamResponse(items.get(value.getParamItemId()).getName(), value.getValue()))
+                .toList();
     }
 
     /**
@@ -126,7 +194,7 @@ public class ProductService {
                 category == null ? null : category.getName(), category == null ? null : category.getPath(),
                 product.getBrandId(), brand == null ? null : brand.getName(), product.getMainImage(),
                 images, product.getDetail(), product.getStatus(), product.getMinPrice(), product.getSales(),
-                null, skus, List.of());
+                null, skus, paramsOf(id));
     }
 
     /** 后台商品分页（关键词 / 分类 / 品牌 / 状态） */
@@ -166,7 +234,8 @@ public class ProductService {
         return new ProductDetailResponse(product.getId(), product.getName(), product.getCategoryId(),
                 category == null ? null : category.getName(), product.getBrandId(),
                 brand == null ? null : brand.getName(), product.getMainImage(), images, product.getDetail(),
-                product.getStatus(), product.getMinPrice(), product.getSales(), product.getOnSaleTime(), skus);
+                product.getStatus(), product.getMinPrice(), product.getSales(), product.getOnSaleTime(), skus,
+                paramsOf(id));
     }
 
     @Transactional
@@ -184,6 +253,7 @@ public class ProductService {
         // 自增 ID 生成后才能算 SKU 编码
         syncSkus(product, request.skus());
         saveImages(product.getId(), request);
+        syncParams(product, request.params());
         syncMinPriceAndStatus(product, request);
         log.info("新增商品 id={} name={} skus={}", product.getId(), product.getName(), request.skus().size());
         return detail(product.getId());
@@ -204,6 +274,7 @@ public class ProductService {
         // SKU 表是逻辑删除：若「删了再插」会撞 uk_sku_code，故按下标原地更新，多余的才逻辑删除
         syncSkus(product, request.skus());
         saveImages(id, request);
+        syncParams(product, request.params());
         syncMinPriceAndStatus(product, request);
         return detail(id);
     }
