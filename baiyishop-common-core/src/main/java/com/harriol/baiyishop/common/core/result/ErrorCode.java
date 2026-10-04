@@ -40,7 +40,14 @@ public enum ErrorCode {
     PARAM_TEMPLATE_NOT_FOUND(30010, "参数模板不存在", 200),
     PARAM_ITEM_NOT_FOUND(30011, "参数项不存在", 200),
     PARAM_ITEM_IN_USE(30012, "该参数项已被商品使用，无法删除", 200),
-    PARAM_TEMPLATE_IN_USE(30013, "该模板下存在参数项，无法删除", 200);
+    PARAM_TEMPLATE_IN_USE(30013, "该模板下存在参数项，无法删除", 200),
+
+    // ---- 4xxxx 库存 ----
+    INSUFFICIENT_STOCK(40001, "库存不足", 200),
+    INVENTORY_NOT_FOUND(40002, "库存记录不存在", 200),
+    INVALID_STOCK_ADJUSTMENT(40003, "库存调整数量非法", 200),
+    SECKILL_STOCK_POOL_NOT_FOUND(40004, "秒杀库存池不存在", 200),
+    ALLOCATION_EXCEEDS_AVAILABLE(40005, "划拨数量超过当前可售库存", 200);
 
     private final int code;
     private final String message;
