@@ -1,6 +1,7 @@
 package com.harriol.baiyishop.product.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.harriol.baiyishop.common.core.exception.BizException;
 import com.harriol.baiyishop.common.core.result.ErrorCode;
@@ -18,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -65,10 +67,12 @@ public class ProductIndexService {
         if (products.isEmpty()) {
             return List.of();
         }
-        Map<Long, Category> categories = byId(categoryMapper.selectBatchIds(products.stream()
-                .map(Product::getCategoryId).filter(Objects::nonNull).collect(Collectors.toSet())), Category::getId);
-        Map<Long, Brand> brands = byId(brandMapper.selectBatchIds(products.stream()
-                .map(Product::getBrandId).filter(Objects::nonNull).collect(Collectors.toSet())), Brand::getId);
+        Map<Long, Category> categories = loadByIds(products.stream()
+                .map(Product::getCategoryId).filter(Objects::nonNull).collect(Collectors.toSet()),
+                categoryMapper, Category::getId);
+        Map<Long, Brand> brands = loadByIds(products.stream()
+                .map(Product::getBrandId).filter(Objects::nonNull).collect(Collectors.toSet()),
+                brandMapper, Brand::getId);
 
         return products.stream().map(product -> {
             Category category = product.getCategoryId() == null ? null : categories.get(product.getCategoryId());
@@ -82,9 +86,17 @@ public class ProductIndexService {
         }).toList();
     }
 
-    private <T> Map<Long, T> byId(List<T> rows, Function<T, Long> idOf) {
+    /**
+     * 按 id 批量取，返回 id → 行 的映射。
+     * <p>**必须先判空**：MyBatis-Plus 对空集合会生成 {@code id IN ( )}，
+     * MySQL 直接报语法错误 —— 无品牌商品是常见数据，绝不能因此 500。
+     */
+    private <T> Map<Long, T> loadByIds(Set<Long> ids, BaseMapper<T> mapper, Function<T, Long> idOf) {
         Map<Long, T> map = new HashMap<>();
-        rows.forEach(row -> map.put(idOf.apply(row), row));
+        if (ids.isEmpty()) {
+            return map;
+        }
+        mapper.selectBatchIds(ids).forEach(row -> map.put(idOf.apply(row), row));
         return map;
     }
 }

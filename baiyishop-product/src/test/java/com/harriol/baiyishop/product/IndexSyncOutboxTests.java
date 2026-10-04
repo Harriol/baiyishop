@@ -185,6 +185,22 @@ class IndexSyncOutboxTests {
     }
 
     @Test
+    @DisplayName("索引文档接口：无品牌、无上架时间的商品也能正常出参（不因空集合查询 500）")
+    void indexDocToleratesMissingBrandAndOnSaleTime() throws Exception {
+        long categoryId = createLeafCategory();
+        long productId = createProduct(categoryId, 100);
+
+        Resp resp = send("GET", "/internal/products/" + productId + "/index-doc", null, null);
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.json().get("code").asInt()).isZero();
+        JsonNode doc = resp.json().get("data");
+        assertThat(doc.get("brandId").isNull()).isTrue();
+        assertThat(doc.get("brandName").isNull()).isTrue();
+        assertThat(doc.get("status").asString()).isEqualTo("OFF_SALE");
+        assertThat(doc.get("onSaleTime").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("索引文档分页：含已下架商品，供全量重建使用")
     void indexDocPageIncludesOffSaleProducts() throws Exception {
         long categoryId = createLeafCategory();
