@@ -10,6 +10,10 @@ mybatis-plus = "3.5.17"
 seata = "2.0.0"
 rocketmq-spring = "2.3.6"
 jjwt = "0.12.7"
+# ES 客户端必须与服务器同版本：Boot 4 默认管理 9.x 客户端，
+# 而 9.x 客户端发的 compatible-with=9 头会被 8.11.3 服务器拒绝（400），
+# 故自行锁定为与 deploy 中 ES 服务器一致的 8.11.3。
+elasticsearch-client = "8.11.3"
 
 [libraries]
 # --- Spring Cloud / Alibaba（BOM） ---
@@ -24,9 +28,11 @@ boot-validation = { module = "org.springframework.boot:spring-boot-starter-valid
 # 注意：Boot 4 的 spring-boot-starter-webmvc 不再自带 Jackson，需要单独引入本 starter
 boot-starter-json = { module = "org.springframework.boot:spring-boot-starter-json" }
 boot-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
-boot-data-elasticsearch = { module = "org.springframework.boot:spring-boot-starter-data-elasticsearch" }
 boot-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 lombok = { module = "org.projectlombok:lombok" }
+
+# --- 检索 ---
+elasticsearch-java = { module = "co.elastic.clients:elasticsearch-java", version.ref = "elasticsearch-client" }
 
 # --- 服务发现与治理 ---
 nacos-discovery = { module = "com.alibaba.cloud:spring-cloud-starter-alibaba-nacos-discovery" }

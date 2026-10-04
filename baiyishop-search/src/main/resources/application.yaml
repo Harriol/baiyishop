@@ -14,6 +14,33 @@ spring:
         server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
         # 本地开发使用 public 命名空间；不同环境用 namespace 隔离
         namespace: ${NACOS_NAMESPACE:}
+  # 消费幂等用 Redis（search-service 无 MySQL schema，docs/database.md 9.3）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# RocketMQ：消费商品变更事件（docs/adr/ADR-005）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+
+# 搜索服务配置（权重与新鲜度窗口可在 Nacos 覆盖）
+baiyishop:
+  search:
+    elasticsearch-uri: ${ES_URI:http://localhost:9200}
+    # 查询与增量写入都走别名，全量重建时原子切换（REQ-302）
+    index-alias: baiyishop_product
+    product-changed-topic: baiyishop-product-changed
+    consumer-group: baiyishop-search
+    # 综合得分 = 销量得分 × sales-weight + 上架新鲜度 × freshness-weight
+    sales-weight: 0.6
+    freshness-weight: 0.4
+    # 销量归一化基准：log(1+sales)/log(1+基准)，上限 1.0
+    sales-normalize-max: 10000
+    # 新鲜度衰减天数：上架 30 天后新鲜度归零
+    freshness-days: 30
+    # 消费幂等键保留天数
+    consume-dedup-ttl-days: 7
 
 management:
   endpoints:
