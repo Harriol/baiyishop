@@ -4,27 +4,82 @@ server:
 spring:
   application:
     name: baiyishop-gateway
-  threads:
-    virtual:
-      enabled: true
+  profiles:
+    # JWT 密钥等敏感配置放在 application-local.yaml（已被 .gitignore 忽略）
+    default: local
+  config:
+    import: optional:classpath:application-local.yaml
   cloud:
     nacos:
-      # 注册中心地址；可用环境变量覆盖（容器内运行时指向 nacos 服务名）
       discovery:
         server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
-        # 本地开发使用 public 命名空间；不同环境用 namespace 隔离
         namespace: ${NACOS_NAMESPACE:}
+    gateway:
+      # 注意：Spring Cloud Gateway 5.x 的前缀是 gateway.server.webflux（4.x 是 gateway）
+      server:
+        webflux:
+          # 只为网关自身保留 actuator 直连，业务路由都在下面显式声明
+          routes:
+            - id: user-service
+              uri: lb://baiyishop-user
+              predicates:
+                - Path=/api/v1/auth/**,/api/v1/users/**,/api/v1/addresses/**,/api/v1/admin/auth/**,/api/v1/admin/admins/**,/api/v1/admin/roles/**,/api/v1/admin/permissions/**
+            - id: product-service
+              uri: lb://baiyishop-product
+              predicates:
+                - Path=/api/v1/categories/**,/api/v1/brands/**,/api/v1/products/**,/api/v1/home/**,/api/v1/admin/categories/**,/api/v1/admin/brands/**,/api/v1/admin/products/**,/api/v1/admin/params/**,/api/v1/admin/home/**
+            - id: search-service
+              uri: lb://baiyishop-search
+              predicates:
+                - Path=/api/v1/search/**
+            - id: inventory-service
+              uri: lb://baiyishop-inventory
+              predicates:
+                - Path=/api/v1/inventory/**,/api/v1/admin/inventory/**
+            - id: order-service
+              uri: lb://baiyishop-order
+              predicates:
+                - Path=/api/v1/carts/**,/api/v1/orders/**,/api/v1/admin/orders/**
+            - id: payment-service
+              uri: lb://baiyishop-payment
+              predicates:
+                - Path=/api/v1/payments/**
+            - id: seckill-service
+              uri: lb://baiyishop-seckill
+              predicates:
+                - Path=/api/v1/seckill/**,/api/v1/admin/seckill/**
+
+# 网关鉴权白名单（docs/api.md 2.1）：格式 方法:路径 或 路径
+baiyishop:
+  gateway:
+    public-paths:
+      - /actuator/**
+      # 注册 / 登录 / 刷新不需要令牌；注销在下面单独放行到服务端自行处理
+      - /api/v1/auth/register
+      - /api/v1/auth/login
+      - /api/v1/auth/wechat-login
+      - /api/v1/auth/refresh
+      - /api/v1/categories/**
+      - /api/v1/brands/**
+      - /api/v1/products/**
+      - /api/v1/home/**
+      - /api/v1/search/**
+      - /api/v1/inventory/**
+      # 渠道回调由渠道服务器调用，靠验签而非令牌保护（REQ-802）
+      - /api/v1/payments/callback/**
+      # 秒杀专区只读接口公开；抢购接口（/skus/{id}/orders）需要登录，故意不放行
+      - GET:/api/v1/seckill/activities
+      - GET:/api/v1/seckill/activities/*
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,gateway
   endpoint:
     health:
       show-details: always
 
-# 统一日志格式：时间 | 级别 | 服务名 | 线程 | traceId | 类 | 消息（REQ-1003、NFR-04）
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${spring.application.name:}] [%thread] [%X{traceId:-}] %logger{36} - %msg%n"

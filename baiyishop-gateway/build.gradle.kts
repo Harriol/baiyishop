@@ -8,11 +8,15 @@ dependencies {
     implementation(platform(libs.spring.cloud.bom))
     implementation(platform(libs.spring.cloud.alibaba.bom))
 
+    // 网关不引 common-web（那是 MVC 的），只复用 common-security 的 JWT 与密码组件
     implementation(project(":baiyishop-common-core"))
+    implementation(project(":baiyishop-common-security"))
+
     implementation(libs.gateway.webflux)
     implementation(libs.boot.starter.json)
-    // 注册中心：服务在 Nacos 可见（REQ-1002）
+    // 注册中心：网关按服务名转发（lb://baiyishop-user）
     implementation(libs.nacos.discovery)
+    implementation(libs.loadbalancer)
 
     implementation(libs.boot.actuator)
 
