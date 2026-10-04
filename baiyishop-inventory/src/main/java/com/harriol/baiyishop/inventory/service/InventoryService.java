@@ -12,10 +12,17 @@ import com.harriol.baiyishop.inventory.dto.StockAvailable;
 import com.harriol.baiyishop.inventory.dto.StockItem;
 import com.harriol.baiyishop.inventory.dto.StockOpResult;
 import com.harriol.baiyishop.inventory.entity.Inventory;
+import com.harriol.baiyishop.inventory.dto.SeckillAllocateRequest;
+import com.harriol.baiyishop.inventory.dto.SeckillPoolItem;
+import com.harriol.baiyishop.inventory.dto.SeckillReturnRequest;
 import com.harriol.baiyishop.inventory.entity.InventoryFlow;
+import com.harriol.baiyishop.inventory.entity.SeckillStockFlow;
+import com.harriol.baiyishop.inventory.entity.SeckillStockPool;
 import com.harriol.baiyishop.inventory.entity.StockAlert;
 import com.harriol.baiyishop.inventory.mapper.InventoryFlowMapper;
 import com.harriol.baiyishop.inventory.mapper.InventoryMapper;
+import com.harriol.baiyishop.inventory.mapper.SeckillStockFlowMapper;
+import com.harriol.baiyishop.inventory.mapper.SeckillStockPoolMapper;
 import com.harriol.baiyishop.inventory.mapper.StockAlertMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,13 +58,177 @@ public class InventoryService {
     private final InventoryMapper inventoryMapper;
     private final InventoryFlowMapper flowMapper;
     private final StockAlertMapper alertMapper;
+    private final SeckillStockPoolMapper seckillPoolMapper;
+    private final SeckillStockFlowMapper seckillFlowMapper;
 
     public InventoryService(InventoryMapper inventoryMapper,
                             InventoryFlowMapper flowMapper,
-                            StockAlertMapper alertMapper) {
+                            StockAlertMapper alertMapper,
+                            SeckillStockPoolMapper seckillPoolMapper,
+                            SeckillStockFlowMapper seckillFlowMapper) {
         this.inventoryMapper = inventoryMapper;
         this.flowMapper = flowMapper;
         this.alertMapper = alertMapper;
+        this.seckillPoolMapper = seckillPoolMapper;
+        this.seckillFlowMapper = seckillFlowMapper;
+    }
+
+    // ==================== 秒杀库存池（REQ-504、REQ-905） ====================
+
+    /**
+     * 划拨普通库存到秒杀池：**划拨即从普通库存扣减**（REQ-504）。
+     * <p>普通库存扣减与秒杀池入账在同一本地事务内，任一步失败都回滚，
+     * 不会出现「普通库存扣了、秒杀池没进」。
+     */
+    @Transactional
+    public SeckillPoolItem allocate(SeckillAllocateRequest request) {
+        String bizKey = request.activitySkuId() + ":ALLOCATE:" + request.batchNo();
+        if (hasSeckillFlow(bizKey)) {
+            log.info("秒杀划拨幂等命中 bizKey={}", bizKey);
+            return poolOf(request.activitySkuId());
+        }
+
+        Inventory inventory = getOrCreate(request.skuId(), request.productId());
+        if (inventoryMapper.decrease(request.skuId(), request.quantity()) == 0) {
+            throw new BizException(ErrorCode.ALLOCATION_EXCEEDS_AVAILABLE);
+        }
+
+        SeckillStockPool pool = seckillPoolMapper.selectOne(Wrappers.<SeckillStockPool>lambdaQuery()
+                .eq(SeckillStockPool::getActivitySkuId, request.activitySkuId()));
+        if (pool == null) {
+            pool = new SeckillStockPool();
+            pool.setActivityId(request.activityId());
+            pool.setActivitySkuId(request.activitySkuId());
+            pool.setSkuId(request.skuId());
+            pool.setTotal(request.quantity());
+            pool.setRemaining(request.quantity());
+            pool.setSold(0);
+            pool.setVersion(0);
+            pool.setUpdatedAt(LocalDateTime.now());
+            seckillPoolMapper.insert(pool);
+        } else {
+            seckillPoolMapper.allocate(request.activitySkuId(), request.quantity());
+        }
+
+        Inventory after = inventoryMapper.selectById(inventory.getId());
+        writeFlow("ALLOCATE:" + request.activitySkuId() + ":" + request.batchNo(), request.skuId(),
+                InventoryFlow.TYPE_ALLOCATE, request.quantity(), after, InventoryFlow.TYPE_ALLOCATE,
+                "划拨至秒杀池 activitySkuId=" + request.activitySkuId(), null);
+        writeSeckillFlow(bizKey, pool.getId(), request.activitySkuId(), SeckillStockFlow.TYPE_ALLOCATE,
+                request.quantity(), pool.getRemaining() - request.quantity(), pool.getRemaining());
+        refreshAlert(after);
+        log.info("秒杀划拨完成 skuId={} quantity={} activitySkuId={}", request.skuId(), request.quantity(),
+                request.activitySkuId());
+        return poolOf(request.activitySkuId());
+    }
+
+    /**
+     * 秒杀库存回补（REQ-504、REQ-905）。
+     * <ul>
+     *   <li>UNSOLD：活动结束，把池内未售出的剩余回补到普通库存</li>
+     *   <li>ROLLBACK：订单超时取消，把该单占用量回滚回秒杀池（用户可再次抢购）</li>
+     * </ul>
+     */
+    @Transactional
+    public SeckillPoolItem returnStock(SeckillReturnRequest request) {
+        SeckillStockPool pool = seckillPoolMapper.selectOne(Wrappers.<SeckillStockPool>lambdaQuery()
+                .eq(SeckillStockPool::getActivitySkuId, request.activitySkuId()));
+        if (pool == null) {
+            throw new BizException(ErrorCode.SECKILL_STOCK_POOL_NOT_FOUND);
+        }
+
+        if (SeckillReturnRequest.MODE_ROLLBACK.equals(request.mode())) {
+            String bizKey = request.orderNo() + ":SECKILL_ROLLBACK";
+            if (hasSeckillFlow(bizKey)) {
+                return poolOf(request.activitySkuId());
+            }
+            int quantity = request.quantity() == null ? 0 : request.quantity();
+            if (seckillPoolMapper.rollback(request.activitySkuId(), quantity) == 0) {
+                throw new BizException(ErrorCode.INVALID_STOCK_ADJUSTMENT, "回滚数量超过已售数量");
+            }
+            SeckillStockPool afterRollback = seckillPoolMapper.selectById(pool.getId());
+            writeSeckillFlow(bizKey, pool.getId(), request.activitySkuId(), SeckillStockFlow.TYPE_ROLLBACK,
+                    quantity, afterRollback.getRemaining() - quantity, afterRollback.getRemaining());
+            log.info("秒杀取消回滚 activitySkuId={} quantity={} orderNo={}",
+                    request.activitySkuId(), quantity, request.orderNo());
+            return poolOf(request.activitySkuId());
+        }
+
+        String bizKey = request.activitySkuId() + ":RETURN:" + request.batchNo();
+        if (hasSeckillFlow(bizKey)) {
+            return poolOf(request.activitySkuId());
+        }
+        int remaining = pool.getRemaining() == null ? 0 : pool.getRemaining();
+        if (remaining <= 0) {
+            return poolOf(request.activitySkuId());
+        }
+        seckillPoolMapper.clearRemaining(request.activitySkuId());
+        Inventory inventory = getOrCreate(pool.getSkuId(), null);
+        inventoryMapper.increase(pool.getSkuId(), remaining);
+
+        Inventory after = inventoryMapper.selectById(inventory.getId());
+        writeFlow("RETURN:" + request.activitySkuId() + ":" + request.batchNo(), pool.getSkuId(),
+                InventoryFlow.TYPE_RETURN, remaining, after, InventoryFlow.TYPE_RETURN,
+                "秒杀活动结束回补 activitySkuId=" + request.activitySkuId(), null);
+        writeSeckillFlow(bizKey, pool.getId(), request.activitySkuId(), SeckillStockFlow.TYPE_RETURN,
+                remaining, remaining, 0);
+        refreshAlert(after);
+        log.info("秒杀未售出回补 activitySkuId={} quantity={}", request.activitySkuId(), remaining);
+        return poolOf(request.activitySkuId());
+    }
+
+    /** 秒杀成交：从秒杀池扣减并计入已售（REQ-903 的落库侧） */
+    @Transactional
+    public SeckillPoolItem deductSeckill(Long activitySkuId, int quantity, String orderNo) {
+        String bizKey = orderNo + ":SECKILL_DEDUCT";
+        SeckillStockPool pool = seckillPoolMapper.selectOne(Wrappers.<SeckillStockPool>lambdaQuery()
+                .eq(SeckillStockPool::getActivitySkuId, activitySkuId));
+        if (pool == null) {
+            throw new BizException(ErrorCode.SECKILL_STOCK_POOL_NOT_FOUND);
+        }
+        if (hasSeckillFlow(bizKey)) {
+            return poolOf(activitySkuId);
+        }
+        if (seckillPoolMapper.deduct(activitySkuId, quantity) == 0) {
+            throw new BizException(ErrorCode.INSUFFICIENT_STOCK, "秒杀库存不足");
+        }
+        SeckillStockPool after = seckillPoolMapper.selectById(pool.getId());
+        writeSeckillFlow(bizKey, pool.getId(), activitySkuId, SeckillStockFlow.TYPE_DEDUCT,
+                quantity, after.getRemaining() + quantity, after.getRemaining());
+        return poolOf(activitySkuId);
+    }
+
+    public SeckillPoolItem poolOf(Long activitySkuId) {
+        SeckillStockPool pool = seckillPoolMapper.selectOne(Wrappers.<SeckillStockPool>lambdaQuery()
+                .eq(SeckillStockPool::getActivitySkuId, activitySkuId));
+        if (pool == null) {
+            return null;
+        }
+        return new SeckillPoolItem(pool.getId(), pool.getActivityId(), pool.getActivitySkuId(),
+                pool.getSkuId(), pool.getTotal(), pool.getRemaining(), pool.getSold(), pool.getUpdatedAt());
+    }
+
+    private boolean hasSeckillFlow(String bizKey) {
+        return seckillFlowMapper.selectOne(Wrappers.<SeckillStockFlow>lambdaQuery()
+                .eq(SeckillStockFlow::getBizKey, bizKey)) != null;
+    }
+
+    private void writeSeckillFlow(String bizKey, Long poolId, Long activitySkuId, String type,
+                                  int quantity, int beforeRemaining, int afterRemaining) {
+        SeckillStockFlow flow = new SeckillStockFlow();
+        flow.setBizKey(bizKey);
+        flow.setPoolId(poolId);
+        flow.setActivitySkuId(activitySkuId);
+        flow.setType(type);
+        flow.setQuantity(quantity);
+        flow.setBeforeRemaining(beforeRemaining);
+        flow.setAfterRemaining(afterRemaining);
+        flow.setCreatedAt(LocalDateTime.now());
+        try {
+            seckillFlowMapper.insert(flow);
+        } catch (DuplicateKeyException ex) {
+            log.info("秒杀池流水幂等命中 bizKey={}", bizKey);
+        }
     }
 
     // ==================== 内部接口：下单 / 支付 / 取消 ====================
@@ -310,6 +481,16 @@ public class InventoryService {
             case InventoryFlow.TYPE_UNLOCK -> {
                 flow.setBeforeAvailable(after.getAvailable() - quantity);
                 flow.setBeforeLocked(after.getLocked() + quantity);
+            }
+            case InventoryFlow.TYPE_ALLOCATE -> {
+                // 划拨：普通可售减少，锁定量不变
+                flow.setBeforeAvailable(after.getAvailable() + quantity);
+                flow.setBeforeLocked(after.getLocked());
+            }
+            case InventoryFlow.TYPE_RETURN -> {
+                // 回补：普通可售增加，锁定量不变
+                flow.setBeforeAvailable(after.getAvailable() - quantity);
+                flow.setBeforeLocked(after.getLocked());
             }
             default -> throw new IllegalStateException("未支持的库存操作类型: " + changeKind);
         }

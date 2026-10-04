@@ -1,16 +1,21 @@
 package com.harriol.baiyishop.inventory.controller;
 
 import com.harriol.baiyishop.common.core.result.Result;
+import com.harriol.baiyishop.inventory.dto.SeckillAllocateRequest;
+import com.harriol.baiyishop.inventory.dto.SeckillPoolItem;
+import com.harriol.baiyishop.inventory.dto.SeckillReturnRequest;
 import com.harriol.baiyishop.inventory.dto.StockAvailable;
 import com.harriol.baiyishop.inventory.dto.StockOpRequest;
 import com.harriol.baiyishop.inventory.dto.StockOpResult;
 import com.harriol.baiyishop.inventory.service.InventoryService;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -51,5 +56,33 @@ public class InventoryInternalController {
     @GetMapping("/skus/{skuId}")
     public Result<StockAvailable> available(@PathVariable Long skuId) {
         return Result.ok(inventoryService.available(skuId));
+    }
+
+    // ---------------- 秒杀库存池（REQ-504、REQ-905） ----------------
+
+    /** 划拨普通库存到秒杀池：划拨即扣减普通库存 */
+    @PostMapping("/seckill/allocate")
+    public Result<SeckillPoolItem> allocate(@Valid @RequestBody SeckillAllocateRequest request) {
+        return Result.ok(inventoryService.allocate(request));
+    }
+
+    /** 回补：UNSOLD 回补普通库存 / ROLLBACK 回滚到秒杀池 */
+    @PostMapping("/seckill/return")
+    public Result<SeckillPoolItem> returnStock(@Valid @RequestBody SeckillReturnRequest request) {
+        return Result.ok(inventoryService.returnStock(request));
+    }
+
+    /** 秒杀成交扣减秒杀池 */
+    @PostMapping("/seckill/deduct")
+    public Result<SeckillPoolItem> deductSeckill(@RequestParam Long activitySkuId,
+                                                 @RequestParam @Min(1) int quantity,
+                                                 @RequestParam String orderNo) {
+        return Result.ok(inventoryService.deductSeckill(activitySkuId, quantity, orderNo));
+    }
+
+    /** 查询秒杀池现状（活动展示与对账用） */
+    @GetMapping("/seckill/pool/{activitySkuId}")
+    public Result<SeckillPoolItem> pool(@PathVariable Long activitySkuId) {
+        return Result.ok(inventoryService.poolOf(activitySkuId));
     }
 }
