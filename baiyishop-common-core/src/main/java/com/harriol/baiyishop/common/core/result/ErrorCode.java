@@ -25,7 +25,18 @@ public enum ErrorCode {
     USER_ADDRESS_NOT_FOUND(20006, "收货地址不存在", 200),
     USER_ADDRESS_FORBIDDEN(20007, "收货地址不存在或不属于当前用户", 200),
     ADMIN_CREDENTIALS_INVALID(20008, "账号或密码错误", 200),
-    ADMIN_DISABLED(20009, "账号已被停用", 200);
+    ADMIN_DISABLED(20009, "账号已被停用", 200),
+
+    // ---- 3xxxx 商品与分类 ----
+    CATEGORY_NOT_FOUND(30001, "分类不存在", 200),
+    CATEGORY_HAS_CHILDREN(30002, "该分类下存在子分类，无法删除", 200),
+    CATEGORY_IN_USE(30003, "该分类已被商品引用，无法删除", 200),
+    CATEGORY_LEVEL_EXCEEDED(30004, "分类最多支持 3 级", 200),
+    BRAND_NOT_FOUND(30005, "品牌不存在", 200),
+    BRAND_IN_USE(30006, "该品牌已被商品引用，无法删除", 200),
+    PRODUCT_NOT_FOUND(30007, "商品不存在", 200),
+    PRODUCT_OFF_SALE(30008, "商品已下架", 200),
+    PARAM_ITEM_TEMPLATE_MISMATCH(30009, "参数项与所选模板不匹配", 200);
 
     private final int code;
     private final String message;
