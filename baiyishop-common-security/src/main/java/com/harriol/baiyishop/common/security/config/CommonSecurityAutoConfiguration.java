@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.harriol.baiyishop.common.security.jwt.JwtProperties;
 import com.harriol.baiyishop.common.security.jwt.JwtTokenProvider;
 import com.harriol.baiyishop.common.security.web.JwtAuthenticationFilter;
+import com.harriol.baiyishop.common.security.web.RoleCheckInterceptor;
 import com.harriol.baiyishop.common.security.jwt.TokenBlacklistChecker;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -11,6 +12,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -41,5 +44,16 @@ public class CommonSecurityAutoConfiguration {
                                                            ObjectMapper objectMapper,
                                                            ObjectProvider<TokenBlacklistChecker> blacklistChecker) {
         return new JwtAuthenticationFilter(tokenProvider, objectMapper, blacklistChecker);
+    }
+
+    /** 注册后台角色校验拦截器（只影响带 @RequiresRole 的接口） */
+    @Bean
+    public WebMvcConfigurer roleCheckWebMvcConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addInterceptors(InterceptorRegistry registry) {
+                registry.addInterceptor(new RoleCheckInterceptor()).addPathPatterns("/**");
+            }
+        };
     }
 }
