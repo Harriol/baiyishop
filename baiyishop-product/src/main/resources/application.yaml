@@ -39,6 +39,21 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+# RocketMQ：本地消息表投递（docs/adr/ADR-005）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+  producer:
+    group: baiyishop-product
+
+# 商品域消息配置
+baiyishop:
+  mq:
+    product-changed-topic: baiyishop-product-changed
+    # 投递失败的最大重试次数，超过后置 FAILED 等人工重放
+    outbox-max-retry: 10
+    # 本地消息表扫描间隔（毫秒）
+    outbox-poll-interval-ms: 2000
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

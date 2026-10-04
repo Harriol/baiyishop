@@ -6,6 +6,7 @@ import com.harriol.baiyishop.common.core.exception.BizException;
 import com.harriol.baiyishop.common.core.result.ErrorCode;
 import com.harriol.baiyishop.common.core.result.PageResult;
 import com.harriol.baiyishop.product.dto.ProductAdminItem;
+import com.harriol.baiyishop.product.dto.ProductChangedEvent;
 import com.harriol.baiyishop.product.dto.ProductDetailResponse;
 import com.harriol.baiyishop.product.dto.ProductListItem;
 import com.harriol.baiyishop.product.dto.ProductParamRequest;
@@ -52,6 +53,8 @@ import java.util.stream.Collectors;
  *   <li>sku_code 由服务端生成 {productId}-{两位序号}，不接受前端传入</li>
  *   <li>本服务**不存库存**：库存权威在 inventory-service（ADR-004、ADR-007）</li>
  *   <li>下架与删除分离：下架改 status，删除走逻辑删除</li>
+ *   <li>新增 / 修改 / 上下架 / 删除都在**同一事务内**写一条 mq_outbox，
+ *       由投递任务异步同步到搜索索引（ADR-005），商品保存不依赖 ES 可用性</li>
  * </ul>
  */
 @Service
@@ -67,6 +70,7 @@ public class ProductService {
     private final CategoryService categoryService;
     private final ParamItemMapper paramItemMapper;
     private final ProductParamValueMapper paramValueMapper;
+    private final OutboxService outboxService;
 
     public ProductService(ProductMapper productMapper,
                           ProductSkuMapper skuMapper,
@@ -75,7 +79,8 @@ public class ProductService {
                           BrandMapper brandMapper,
                           CategoryService categoryService,
                           ParamItemMapper paramItemMapper,
-                          ProductParamValueMapper paramValueMapper) {
+                          ProductParamValueMapper paramValueMapper,
+                          OutboxService outboxService) {
         this.productMapper = productMapper;
         this.skuMapper = skuMapper;
         this.imageMapper = imageMapper;
@@ -84,6 +89,7 @@ public class ProductService {
         this.categoryService = categoryService;
         this.paramItemMapper = paramItemMapper;
         this.paramValueMapper = paramValueMapper;
+        this.outboxService = outboxService;
     }
 
     /**
@@ -255,6 +261,7 @@ public class ProductService {
         saveImages(product.getId(), request);
         syncParams(product, request.params());
         syncMinPriceAndStatus(product, request);
+        outboxService.appendProductChanged(product.getId(), ProductChangedEvent.ACTION_UPSERT);
         log.info("新增商品 id={} name={} skus={}", product.getId(), product.getName(), request.skus().size());
         return detail(product.getId());
     }
@@ -276,6 +283,7 @@ public class ProductService {
         saveImages(id, request);
         syncParams(product, request.params());
         syncMinPriceAndStatus(product, request);
+        outboxService.appendProductChanged(id, ProductChangedEvent.ACTION_UPSERT);
         return detail(id);
     }
 
@@ -285,6 +293,7 @@ public class ProductService {
         skuMapper.delete(Wrappers.<ProductSku>lambdaQuery().eq(ProductSku::getProductId, id));
         imageMapper.delete(Wrappers.<ProductImage>lambdaQuery().eq(ProductImage::getProductId, id));
         productMapper.deleteById(product.getId());
+        outboxService.appendProductChanged(id, ProductChangedEvent.ACTION_DELETE);
         log.info("删除商品（逻辑删除）id={}", id);
     }
 
@@ -294,6 +303,7 @@ public class ProductService {
         product.setStatus(onSale ? Product.STATUS_ON_SALE : Product.STATUS_OFF_SALE);
         product.setOnSaleTime(onSale ? LocalDateTime.now() : product.getOnSaleTime());
         productMapper.updateById(product);
+        outboxService.appendProductChanged(id, ProductChangedEvent.ACTION_UPSERT);
         return detail(id);
     }
 

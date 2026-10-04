@@ -14,6 +14,9 @@ dependencies {
     // 鉴权：后台接口的角色校验与登录用户上下文
     implementation(project(":baiyishop-common-security"))
 
+    // 消息：商品变更事件投递到 RocketMQ，供 search-service 重建索引（ADR-005）
+    implementation(libs.rocketmq.spring.boot.starter)
+
     // 注册中心：服务在 Nacos 可见（REQ-1002）
     implementation(libs.nacos.discovery)
 
