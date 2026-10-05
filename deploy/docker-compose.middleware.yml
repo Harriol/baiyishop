@@ -222,7 +222,8 @@ services:
       - ./seata/application.yml:/seata-server/resources/application.yml:ro
       - seata-data:/seata-server/data
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 8091 || exit 1"]
+      # 镜像里没有 nc，用 bash 的 /dev/tcp 做一次 TCP 连接探测（容器内自带 bash）
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8091' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 20
