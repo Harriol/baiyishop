@@ -51,6 +51,32 @@ docker compose --env-file .env -f docker-compose.middleware.yml up -d
 | RocketMQ 5.3.1 | `baiyishop-rocketmq-namesrv` / `-broker` | 9876 / 10911 | 本地消息表投递与延时消息 |
 | Elasticsearch 8.11.3 | `baiyishop-elasticsearch` | 9200 | 商品检索（REQ-301） |
 | MinIO | `baiyishop-minio` | 9000 / 9001 | 商品图片（R5-Q4），控制台 9001 |
+| Seata Server 2.0.0 | `baiyishop-seata-server` | 8091 / 7091 | 分布式事务 TC（ADR-002），控制台 7091 |
+
+## Seata TC：本地用 grouplist 直连
+
+TC 注册到 Nacos 的是**容器 IP**（如 `172.21.0.8`），Docker Desktop 下宿主机连不上这个地址
+（实测不可达，`127.0.0.1:8091` 可达）。因此应用侧默认用 grouplist 直连：
+
+```yaml
+seata:
+  registry:
+    type: file          # 本地：不查注册中心
+  service:
+    grouplist:
+      default: 127.0.0.1:8091
+```
+
+部署到同一 bridge 网络（应用也容器化）时，把环境变量 `SEATA_REGISTRY_TYPE=nacos` 传给应用即可切回服务发现。
+
+另外两点：
+
+- `deploy/seata/application.yml` 是**镜像自带配置的副本 + 我们的改动**。里面 `logging.file.path`、
+  `console.user.*`、`seata.security.*` 看着多余，但容器里的 `ServerRunner` / `CustomUserDetailsServiceImpl`
+  会注入它们，删掉会直接启动失败。
+- RocketMQ 的定时消息上限默认 3 天，覆盖不了「发货后 7 天自动确认收货」（REQ-707）。
+  `deploy/rocketmq/broker.conf` 已把 `timerMaxDelaySec` 提到 8 天并显式打开 `timerWheelEnable`；
+  改完需要重启 broker 容器（`up -d --force-recreate rocketmq-broker`）。
 
 ## 数据库账号
 
