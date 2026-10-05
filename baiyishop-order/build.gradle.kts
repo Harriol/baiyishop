@@ -20,6 +20,8 @@ dependencies {
     implementation(libs.loadbalancer)
     // 消息：下单后投递延时取消 / 发货后自动收货（REQ-704、REQ-707）
     implementation(libs.rocketmq.spring.boot.starter)
+    // 分布式事务：下单「写订单 + 锁库存」的原子性（ADR-002、docs/architecture.md 5.1）
+    implementation(libs.seata.spring.boot.starter)
 
     implementation(libs.boot.actuator)
 

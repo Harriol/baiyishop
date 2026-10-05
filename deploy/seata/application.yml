@@ -1,0 +1,53 @@
+# 百益商城 · Seata Server（TC，事务协调器）配置（docs/architecture.md 2.4、6.1）
+#
+# 本文件是镜像自带 application.yml 的副本 + 我们的改动，因此下面这些「看起来多余」的项
+# （logging.config / console.user / security.*）必须原样保留：容器里的 ServerRunner、
+# CustomUserDetailsServiceImpl 会注入它们，删掉会直接启动失败。
+#
+# 相对镜像默认值的改动：
+# - registry 由 file 改为 nacos：服务名 seata-server，供各服务按服务名发现 TC
+# - store.file.dir 指向挂载卷
+# - SEATA_IP 由 compose 设为 127.0.0.1：应用跑在宿主机、TC 在容器里，注册宿主机地址才连得上
+server:
+  port: 7091
+
+spring:
+  application:
+    name: seata-server
+
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    path: ${log.home:${user.home}/logs/seata}
+
+console:
+  user:
+    username: seata
+    password: seata
+
+seata:
+  config:
+    # 本地开发不接配置中心：TC 的配置就来自本文件
+    type: file
+  registry:
+    type: nacos
+    nacos:
+      application: seata-server
+      server-addr: baiyishop-nacos:8848
+      group: SEATA_GROUP
+      cluster: default
+      namespace: ""
+  store:
+    mode: file
+    file:
+      dir: /seata-server/data
+  server:
+    service-port: 8091
+    # 单机开发：提交 / 回滚重试交给 TC 默认策略，不额外限制时长
+    max-commit-retry-timeout: -1
+    max-rollback-retry-timeout: -1
+  security:
+    secretKey: SeataSecretKey0c382ef121d778043159209298fd40bf3850a017
+    tokenValidityInMilliseconds: 1800000
+    ignore:
+      urls: /,/**/*.css,/**/*.js,/**/*.html,/**/*.map,/**/*.svg,/**/*.png,/**/*.jpeg,/**/*.ico,/api/v1/auth/login,/metadata/v1/**

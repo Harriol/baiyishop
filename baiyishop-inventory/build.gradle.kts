@@ -16,6 +16,8 @@ dependencies {
 
     // 注册中心：服务在 Nacos 可见（REQ-1002）
     implementation(libs.nacos.discovery)
+    // 分布式事务：作为下单全局事务的参与方（RM），库存变更由 TC 依据 undo_log 回滚（ADR-002）
+    implementation(libs.seata.spring.boot.starter)
 
     implementation(libs.boot.actuator)
 

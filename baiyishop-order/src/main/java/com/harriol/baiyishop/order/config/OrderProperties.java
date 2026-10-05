@@ -13,12 +13,16 @@ import java.time.Duration;
  * @param autoReceiveAfter  发货后自动确认收货时长，默认 7 天（REQ-707）
  * @param timeoutScanDelay   超时兜底扫描间隔（延时消息丢失时的第二道防线）
  * @param outboxMaxRetry    本地消息投递最大重试次数
+ * @param orderTimeoutTopic 15 分钟未支付自动取消的延时消息 topic（REQ-704）
+ * @param orderAutoReceiveTopic 发货 7 天后自动确认收货的延时消息 topic（REQ-707）
  */
 @ConfigurationProperties(prefix = "baiyishop.order")
 public record OrderProperties(
         @DefaultValue("99") int maxQuantityPerSku,
         @DefaultValue("15m") Duration payTimeout,
         @DefaultValue("7d") Duration autoReceiveAfter,
-        @DefaultValue("5m") Duration timeoutScanDelay,
-        @DefaultValue("10") int outboxMaxRetry) {
+        @DefaultValue("1m") Duration timeoutScanDelay,
+        @DefaultValue("10") int outboxMaxRetry,
+        @DefaultValue("baiyishop-order-timeout") String orderTimeoutTopic,
+        @DefaultValue("baiyishop-order-auto-receive") String orderAutoReceiveTopic) {
 }

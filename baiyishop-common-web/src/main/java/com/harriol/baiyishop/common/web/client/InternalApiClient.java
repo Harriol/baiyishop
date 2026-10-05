@@ -84,7 +84,9 @@ public class InternalApiClient {
         String raw;
         try {
             RestClient.RequestBodySpec spec = rest.method(method).uri(serviceBase + path)
-                    .header(CALLER_HEADER, caller);
+                    .header(CALLER_HEADER, caller)
+                    // 全局事务 XID：让被调方加入同一个 Seata 全局事务（ADR-002）
+                    .headers(SeataXidPropagator::propagate);
             String traceId = MDC.get(TraceIdFilter.TRACE_ID_MDC_KEY);
             if (traceId != null && !traceId.isBlank()) {
                 spec = spec.header(TraceIdFilter.TRACE_ID_HEADER, traceId);

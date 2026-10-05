@@ -53,12 +53,31 @@ baiyishop:
     pay-timeout: 15m
     # 发货后自动确认收货时长（REQ-707）
     auto-receive-after: 7d
-    # 延时消息丢失时的兜底扫描间隔
-    timeout-scan-delay: 5m
+    # 延时消息丢失时的兜底扫描间隔（默认 1 分钟，保证「15 分钟未支付」的精度）
+    timeout-scan-delay: 1m
     outbox-max-retry: 10
-  mq:
     order-timeout-topic: baiyishop-order-timeout
     order-auto-receive-topic: baiyishop-order-auto-receive
+
+# 分布式事务（ADR-002、docs/architecture.md 6.1）
+seata:
+  enabled: true
+  application-id: baiyishop-order
+  tx-service-group: baiyishop_tx_group
+  registry:
+    # 本地开发用 grouplist 直连 TC：Docker Desktop 下容器 IP 宿主机不可达，
+    # 而 TC 注册到 Nacos 的是容器 IP。部署到同一 bridge 网络时改成 nacos 即可（见 deploy/README.md）
+    type: ${SEATA_REGISTRY_TYPE:file}
+    nacos:
+      application: seata-server
+      server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      group: SEATA_GROUP
+      namespace: ""
+  service:
+    vgroup-mapping:
+      baiyishop_tx_group: default
+    grouplist:
+      default: ${SEATA_TC_ADDR:127.0.0.1:8091}
 
 mybatis-plus:
   configuration:

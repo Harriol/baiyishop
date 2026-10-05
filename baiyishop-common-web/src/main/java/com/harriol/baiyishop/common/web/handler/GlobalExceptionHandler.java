@@ -65,9 +65,28 @@ public class GlobalExceptionHandler {
     /** 兜底：不向调用方返回堆栈细节 */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleUnexpected(Exception ex) {
+        BizException biz = findBizException(ex);
+        if (biz != null) {
+            // Seata 的 @GlobalTransactional 会把业务异常包成 RuntimeException("try to proceed invocation error")，
+            // 不回解包装的话，库存不足（40001）这类准确业务码会被兜底成「系统繁忙」（REQ-701 约定 3）
+            return handleBiz(biz);
+        }
         log.error("系统异常", ex);
         return ResponseEntity.status(ErrorCode.SYSTEM_ERROR.getHttpStatus())
                 .body(Result.fail(ErrorCode.SYSTEM_ERROR));
+    }
+
+    /** 沿 cause 链找业务异常（含自引用保护） */
+    private BizException findBizException(Throwable ex) {
+        for (Throwable current = ex; current != null; current = current.getCause()) {
+            if (current instanceof BizException biz) {
+                return biz;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return null;
     }
 
     private ResponseEntity<Result<Void>> badRequest(String message) {

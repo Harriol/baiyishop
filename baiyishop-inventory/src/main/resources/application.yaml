@@ -39,6 +39,24 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+# 分布式事务：库存服务是下单全局事务的参与方（RM），回滚依赖本 schema 的 undo_log（ADR-002）
+seata:
+  enabled: true
+  application-id: baiyishop-inventory
+  tx-service-group: baiyishop_tx_group
+  registry:
+    type: ${SEATA_REGISTRY_TYPE:file}
+    nacos:
+      application: seata-server
+      server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      group: SEATA_GROUP
+      namespace: ""
+  service:
+    vgroup-mapping:
+      baiyishop_tx_group: default
+    grouplist:
+      default: ${SEATA_TC_ADDR:127.0.0.1:8091}
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

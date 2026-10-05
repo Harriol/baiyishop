@@ -202,6 +202,34 @@ services:
     restart: unless-stopped
     networks: [baiyishop-net]
 
+  # ==================== Seata Server（TC） ====================
+  # 跨服务写的全局事务协调器（ADR-002）：下单锁库存 / 支付扣减 / 取消释放走 AT 全局事务。
+  # 注册到 Nacos（服务名 seata-server），各服务作为 RM 接入。
+  seata-server:
+    image: seataio/seata-server:2.0.0
+    container_name: baiyishop-seata-server
+    environment:
+      # 应用跑在宿主机、TC 在容器里：注册宿主机地址，客户端才连得上（同 RocketMQ 的 brokerIP1）
+      SEATA_IP: 127.0.0.1
+      SEATA_PORT: "8091"
+      TZ: Asia/Shanghai
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+    ports:
+      - "${SEATA_PORT:-8091}:8091"
+      - "7091:7091"
+    volumes:
+      - ./seata/application.yml:/seata-server/resources/application.yml:ro
+      - seata-data:/seata-server/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8091 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    networks: [baiyishop-net]
+
 networks:
   baiyishop-net:
     name: baiyishop-net
@@ -217,3 +245,4 @@ volumes:
   rocketmq-broker-logs:
   es-data:
   minio-data:
+  seata-data:
