@@ -134,6 +134,7 @@ class OrderApiTests {
     private final Map<Long, Integer> stock = new HashMap<>();
     private final AtomicInteger lockCalls = new AtomicInteger();
     private final AtomicInteger releaseCalls = new AtomicInteger();
+    private final AtomicInteger deductCalls = new AtomicInteger();
     /** 结算页默认地址（地址表按 userId 查，与 addresses 的 key（addressId）不同） */
     private Long defaultAddressId;
 
@@ -149,6 +150,7 @@ class OrderApiTests {
         stock.clear();
         lockCalls.set(0);
         releaseCalls.set(0);
+        deductCalls.set(0);
         defaultAddressId = null;
 
         doAnswer(invocation -> {
@@ -169,6 +171,10 @@ class OrderApiTests {
             releaseCalls.incrementAndGet();
             return null;
         }).when(inventoryClient).release(anyString(), any());
+        doAnswer(invocation -> {
+            deductCalls.incrementAndGet();
+            return null;
+        }).when(inventoryClient).deduct(anyString(), any());
         doAnswer(invocation -> Optional.ofNullable(addresses.get(invocation.getArgument(0))))
                 .when(userClient).address(anyLong());
         doAnswer(invocation -> Optional.ofNullable(defaultAddressId).map(addresses::get))
@@ -494,7 +500,8 @@ class OrderApiTests {
         assertThat(send("POST", "/api/v1/admin/orders/" + orderNo + "/ship",
                 "{\"trackingNo\":\"SF123\"}", adminToken, null).json().get("code").asInt()).isEqualTo(50002);
 
-        arrangeStatus(orderNo, OrderStatus.PENDING_SHIPMENT, null);
+        // 走真实支付链路：支付成功事件把订单推进到待发货（REQ-802-3）
+        orderService.markPaid(orderNo, "WECHAT", "WX-" + orderNo);
         assertThat(send("POST", "/api/v1/admin/orders/" + orderNo + "/ship",
                 "{\"trackingNo\":\"SF1234567890\"}", adminToken, null).json().get("code").asInt()).isZero();
 
@@ -516,6 +523,59 @@ class OrderApiTests {
                 "{\"trackingNo\":\"SF999\"}", serviceToken, null).json().get("code").asInt()).isEqualTo(10003);
         assertThat(send("GET", "/api/v1/admin/orders?page=1&size=5", null, serviceToken, null)
                 .json().get("code").asInt()).isZero();
+    }
+
+    @Test
+    @DisplayName("支付成功：订单转待发货并扣减库存，重复事件只扣一次（REQ-802-3）")
+    void paymentSuccessMovesOrderAndDeductsStock() throws Exception {
+        long skuId = newSku(1500, 10);
+        long addressId = newAddress();
+        String orderNo = buyNow(skuId, 2, addressId, requestId()).json().get("data").get("orderNo").asString();
+
+        orderService.markPaid(orderNo, "ALIPAY", "ALI-" + orderNo);
+        orderService.markPaid(orderNo, "ALIPAY", "ALI-" + orderNo);
+
+        Order order = orderOf(orderNo);
+        assertThat(order.getStatus()).isEqualTo("PENDING_SHIPMENT");
+        assertThat(order.getPayType()).isEqualTo("ALIPAY");
+        assertThat(order.getPayTime()).isNotNull();
+        assertThat(deductCalls.get()).isEqualTo(1);
+        assertThat(statusLogMapper.selectList(Wrappers.<OrderStatusLog>lambdaQuery()
+                        .eq(OrderStatusLog::getOrderNo, orderNo).orderByAsc(OrderStatusLog::getId)).get(1)
+                .getToStatus()).isEqualTo("PENDING_SHIPMENT");
+    }
+
+    @Test
+    @DisplayName("已取消订单收到支付成功：不扣库存不改状态，留 WARN 供人工退款")
+    void paymentAfterCancelIsIgnored() throws Exception {
+        long skuId = newSku(1600, 10);
+        long addressId = newAddress();
+        String orderNo = buyNow(skuId, 1, addressId, requestId()).json().get("data").get("orderNo").asString();
+        send("PUT", "/api/v1/orders/" + orderNo + "/cancel", null, userToken, null);
+
+        orderService.markPaid(orderNo, "WECHAT", "WX-LATE-" + orderNo);
+
+        assertThat(orderOf(orderNo).getStatus()).isEqualTo("CANCELLED");
+        assertThat(deductCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("订单可支付性内部接口：回传归属 / 状态 / 金额 / 超时时间（REQ-801）")
+    void payableEndpointExposesOrderState() throws Exception {
+        long skuId = newSku(1700, 10);
+        long addressId = newAddress();
+        String orderNo = buyNow(skuId, 2, addressId, requestId()).json().get("data").get("orderNo").asString();
+
+        JsonNode data = send("GET", "/internal/orders/" + orderNo + "/payable", null, null, null)
+                .json().get("data");
+        assertThat(data.get("orderNo").asString()).isEqualTo(orderNo);
+        assertThat(data.get("userId").asLong()).isEqualTo(userId);
+        assertThat(data.get("status").asString()).isEqualTo("PENDING_PAYMENT");
+        assertThat(data.get("payAmount").asLong()).isEqualTo(3400);
+        assertThat(data.get("timeoutAt").asString()).isNotBlank();
+
+        assertThat(send("GET", "/internal/orders/NOT-EXIST/payable", null, null, null)
+                .json().get("code").asInt()).isEqualTo(50001);
     }
 
     @Test

@@ -58,6 +58,8 @@ baiyishop:
     outbox-max-retry: 10
     order-timeout-topic: baiyishop-order-timeout
     order-auto-receive-topic: baiyishop-order-auto-receive
+    # 支付成功事件（payment-service 生产，本服务消费，REQ-802）
+    payment-success-topic: baiyishop-payment-success
 
 # 分布式事务（ADR-002、docs/architecture.md 6.1）
 seata:

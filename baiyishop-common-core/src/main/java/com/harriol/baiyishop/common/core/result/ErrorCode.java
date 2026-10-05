@@ -56,7 +56,13 @@ public enum ErrorCode {
     CART_EMPTY_CHECKED(50004, "请选择要结算的商品", 200),
     ORDER_ADDRESS_REQUIRED(50005, "请选择收货地址", 200),
     CART_QUANTITY_EXCEEDED(50006, "超出单品限购数量", 200),
-    CART_ITEM_NOT_FOUND(50007, "购物车条目不存在", 200);
+    CART_ITEM_NOT_FOUND(50007, "购物车条目不存在", 200),
+
+    // ---- 6xxxx 支付 ----
+    PAYMENT_NOT_FOUND(60001, "支付单不存在", 200),
+    PAYMENT_NOT_ALLOWED(60002, "该订单当前不可支付", 200),
+    PAYMENT_AMOUNT_MISMATCH(60003, "支付金额与订单不一致", 200),
+    PAYMENT_SIGN_INVALID(60004, "回调验签失败", 200);
 
     private final int code;
     private final String message;

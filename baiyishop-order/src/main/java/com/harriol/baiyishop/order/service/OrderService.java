@@ -21,6 +21,7 @@ import com.harriol.baiyishop.order.dto.OrderDetailView;
 import com.harriol.baiyishop.order.dto.OrderItemView;
 import com.harriol.baiyishop.order.dto.OrderLine;
 import com.harriol.baiyishop.order.dto.OrderSummary;
+import com.harriol.baiyishop.order.dto.PayableOrderView;
 import com.harriol.baiyishop.order.dto.ReceiverView;
 import com.harriol.baiyishop.order.dto.SettleRequest;
 import com.harriol.baiyishop.order.dto.SettleView;
@@ -65,6 +66,7 @@ public class OrderService {
     private static final String REASON_USER_CANCEL = "用户取消";
     private static final String REASON_TIMEOUT = "超时未支付";
     private static final String REASON_AUTO_RECEIVE = "发货 7 天自动确认收货";
+    private static final String REASON_PAID = "支付成功";
 
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
@@ -230,6 +232,11 @@ public class OrderService {
         return detailOf(require(orderNo));
     }
 
+    /** 订单可支付性（内部接口，REQ-801）：payment-service 发起支付前回查 */
+    public PayableOrderView payableView(String orderNo) {
+        return PayableOrderView.from(require(orderNo));
+    }
+
     // ==================== 状态流转（REQ-703 ~ REQ-707） ====================
 
     /** 用户取消订单：仅待付款可取消（REQ-705），取消与超时并发时只有一方成功 */
@@ -322,6 +329,46 @@ public class OrderService {
         writeStatusLog(order, OrderStatus.PENDING_RECEIPT, OrderStatus.COMPLETED,
                 OrderStatusLog.OPERATOR_SYSTEM, null, REASON_AUTO_RECEIVE);
         log.info("订单自动确认收货 orderNo={}", orderNo);
+    }
+
+    /**
+     * 支付成功：订单流转为待发货 + 扣减库存（REQ-802-3，docs/architecture.md 5.2）。
+     * <p>两者同属一个 Seata 全局事务：扣减失败会连同状态流转一起回滚，订单仍停在待付款，
+     * 由支付侧的对账 / 重投补上。消息重复投递时，条件更新返回 0 行即直接返回，不重复扣减。
+     * <p>若订单已被超时取消（用户付了钱但订单已关），这里**不扣库存**并打 WARN 日志，
+     * 交由人工/对账走退款，绝不把已关闭的订单改成待发货。
+     */
+    @GlobalTransactional(name = "baiyishop-order-paid", rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
+    public void markPaid(String orderNo, String channel, String channelTradeNo) {
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery().eq(Order::getOrderNo, orderNo));
+        if (order == null) {
+            log.warn("支付成功事件找不到订单，需人工核对 orderNo={} channelTradeNo={}", orderNo, channelTradeNo);
+            return;
+        }
+        if (!OrderStatus.PENDING_PAYMENT.name().equals(order.getStatus())) {
+            if (OrderStatus.CANCELLED.name().equals(order.getStatus())) {
+                log.warn("订单已取消但收到支付成功，需人工退款 orderNo={} channelTradeNo={}", orderNo, channelTradeNo);
+            } else {
+                log.info("订单已是终态，忽略重复的支付成功事件 orderNo={} status={}", orderNo, order.getStatus());
+            }
+            return;
+        }
+
+        int rows = orderMapper.update(null, Wrappers.<Order>lambdaUpdate()
+                .eq(Order::getOrderNo, orderNo)
+                .eq(Order::getStatus, OrderStatus.PENDING_PAYMENT.name())
+                .set(Order::getStatus, OrderStatus.PENDING_SHIPMENT.name())
+                .set(Order::getPayType, channel)
+                .set(Order::getPayTime, LocalDateTime.now()));
+        if (rows == 0) {
+            log.info("订单状态已被并发流转，忽略支付成功事件 orderNo={}", orderNo);
+            return;
+        }
+        inventoryClient.deduct(orderNo, inventoryItems(orderNo));
+        writeStatusLog(order, OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_SHIPMENT,
+                OrderStatusLog.OPERATOR_SYSTEM, null, REASON_PAID + "（" + channel + "）");
+        log.info("订单已支付待发货 orderNo={} channel={}", orderNo, channel);
     }
 
     // ==================== 内部方法 ====================

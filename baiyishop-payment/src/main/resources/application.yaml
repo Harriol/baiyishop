@@ -39,6 +39,22 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+# RocketMQ：支付成功事件（docs/architecture.md 4.2、5.2）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+  producer:
+    group: baiyishop-payment
+
+baiyishop:
+  payment:
+    # 模拟渠道密钥：仅用于本地模拟签名（真实渠道密钥走密钥管理，绝不入库 / 不入日志）
+    mock-secret: ${PAYMENT_MOCK_SECRET:BaiyiMockChannelSecret2026}
+    # 模拟渠道的「一键支付」入口开关：仅本地开发为 true，生产环境必须关闭
+    mock-pay-enabled: ${PAYMENT_MOCK_PAY_ENABLED:true}
+    outbox-max-retry: 10
+  mq:
+    payment-success-topic: baiyishop-payment-success
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
