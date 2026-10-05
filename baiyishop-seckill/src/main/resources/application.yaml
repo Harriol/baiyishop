@@ -39,6 +39,30 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+  # 秒杀预扣与限购计数存 Redis（ADR-008，AOF 已开启）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# RocketMQ：预扣成功后的异步下单（docs/architecture.md 5.4）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+  producer:
+    group: baiyishop-seckill
+
+baiyishop:
+  seckill:
+    # 预扣成功后的下单消息 topic（order-service 消费）
+    order-topic: baiyishop-seckill-order
+    # 秒杀订单取消消息（order-service 生产，本服务消费后回补秒杀池，REQ-905）
+    cancel-topic: baiyishop-seckill-order-cancel
+    # 单用户限流：每秒最多几次抢购请求（REQ-906）
+    rate-limit-per-second: 10
+    # 排队记录超过多少分钟仍未落单，由补偿任务兜底（ADR-008 失败补偿）
+    queued-timeout-minutes: 5
+    outbox-max-retry: 10
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

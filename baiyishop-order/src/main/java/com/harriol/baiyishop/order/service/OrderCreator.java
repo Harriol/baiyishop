@@ -7,6 +7,9 @@ import com.harriol.baiyishop.order.domain.OrderStatus;
 import com.harriol.baiyishop.order.dto.OrderCommand;
 import com.harriol.baiyishop.order.dto.OrderLine;
 import com.harriol.baiyishop.order.dto.OrderTimeoutEvent;
+import com.harriol.baiyishop.order.dto.AddressSnapshot;
+import com.harriol.baiyishop.order.dto.SeckillOrderEventView;
+import com.harriol.baiyishop.order.dto.SkuSnapshot;
 import com.harriol.baiyishop.order.entity.Order;
 import com.harriol.baiyishop.order.entity.OrderItem;
 import com.harriol.baiyishop.order.entity.OrderRequest;
@@ -120,6 +123,57 @@ public class OrderCreator {
 
         log.info("下单成功 orderNo={} userId={} items={} payAmount={}", orderNo, command.userId(),
                 command.lines().size(), order.getPayAmount());
+        return order;
+    }
+
+    /**
+     * 秒杀下单（REQ-903、docs/architecture.md 5.4）：建单 + 扣减秒杀池同属一个全局事务。
+     * <p>Redis 预扣已经把高并发挡在外面，这里是对 MySQL 的第二次判定：
+     * 秒杀池以 `remaining >= n` 条件更新，**最终不会为负**（ADR-008 第 2 条）。
+     * <p>金额取活动里的秒杀价（不取商品当前售价），快照写入订单明细。
+     */
+    @GlobalTransactional(name = "baiyishop-order-seckill", rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
+    public Order createSeckillOrder(SeckillOrderEventView event, SkuSnapshot sku, AddressSnapshot address) {
+        String orderNo = OrderNoGenerator.next(event.userId());
+
+        inventoryClient.deductSeckill(orderNo, event.activitySkuId(), event.quantity());
+
+        long amount = event.seckillPrice() * event.quantity();
+        Order order = new Order();
+        order.setOrderNo(orderNo);
+        order.setUserId(event.userId());
+        order.setSource("SECKILL");
+        order.setSeckillTicketId(event.ticketId());
+        order.setStatus(OrderStatus.PENDING_PAYMENT.name());
+        order.setTotalAmount(amount);
+        order.setFreightAmount(0L);
+        order.setPayAmount(amount);
+        order.setReceiverName(address.receiverName());
+        order.setReceiverPhone(address.receiverPhone());
+        order.setReceiverAddress(address.province() + address.city() + address.district() + address.detail());
+        order.setRemark("秒杀活动订单");
+        order.setTimeoutAt(LocalDateTime.now().plus(properties.payTimeout()));
+        orderMapper.insert(order);
+
+        OrderItem item = new OrderItem();
+        item.setOrderId(order.getId());
+        item.setOrderNo(orderNo);
+        item.setProductId(event.productId());
+        item.setSkuId(event.skuId());
+        item.setProductName(sku.productName());
+        item.setSkuName(sku.specName());
+        item.setProductImage(sku.image() == null ? sku.productImage() : sku.image());
+        item.setUnitPrice(event.seckillPrice());
+        item.setQuantity(event.quantity());
+        item.setTotalAmount(amount);
+        orderItemMapper.insert(item);
+
+        writeStatusLog(order, null, OrderStatus.PENDING_PAYMENT, OrderStatusLog.OPERATOR_SYSTEM, null, "秒杀下单");
+        outboxService.append(properties.orderTimeoutTopic(), TAG_TIMEOUT, orderNo,
+                new OrderTimeoutEvent(orderNo), order.getTimeoutAt());
+
+        log.info("秒杀下单成功 orderNo={} ticketId={} amount={}", orderNo, event.ticketId(), amount);
         return order;
     }
 

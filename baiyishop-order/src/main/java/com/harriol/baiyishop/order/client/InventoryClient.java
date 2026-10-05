@@ -6,6 +6,7 @@ import com.harriol.baiyishop.order.dto.InventoryOpItem;
 import com.harriol.baiyishop.order.dto.InventoryOpRequest;
 import com.harriol.baiyishop.order.dto.InventoryOpResult;
 import com.harriol.baiyishop.order.dto.OrderLine;
+import com.harriol.baiyishop.order.dto.SeckillPoolView;
 import com.harriol.baiyishop.order.dto.StockAvailable;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
@@ -62,6 +63,15 @@ public class InventoryClient {
     /** 取消 / 超时释放（REQ-503、REQ-705）：锁定 → 可售 */
     public InventoryOpResult release(String orderNo, List<InventoryOpItem> items) {
         return post("/internal/inventory/release", orderNo, items, null);
+    }
+
+    /**
+     * 秒杀成交扣减秒杀池（REQ-903、REQ-504）：条件更新 remaining >= n 保证 MySQL 侧也不为负。
+     * <p>库存不足（池子已被别的请求扣完）时 inventory 返回 40001，调用方按「抢购失败」回写并回补 Redis。
+     */
+    public SeckillPoolView deductSeckill(String orderNo, long activitySkuId, int quantity) {
+        return client.post("/internal/inventory/seckill/deduct?activitySkuId=" + activitySkuId
+                + "&quantity=" + quantity + "&orderNo=" + orderNo, null, SeckillPoolView.class);
     }
 
     private List<InventoryOpItem> toItems(List<OrderLine> lines) {

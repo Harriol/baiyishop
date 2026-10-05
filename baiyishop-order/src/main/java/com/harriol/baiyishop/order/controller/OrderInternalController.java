@@ -2,6 +2,7 @@ package com.harriol.baiyishop.order.controller;
 
 import com.harriol.baiyishop.common.core.result.Result;
 import com.harriol.baiyishop.order.dto.PayableOrderView;
+import com.harriol.baiyishop.order.dto.TicketOrderView;
 import com.harriol.baiyishop.order.service.OrderService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,5 +27,11 @@ public class OrderInternalController {
     @GetMapping("/{orderNo}/payable")
     public Result<PayableOrderView> payable(@PathVariable String orderNo) {
         return Result.ok(orderService.payableView(orderNo));
+    }
+
+    /** 按秒杀票据回查订单（seckill 对账用，REQ-903）；没有对应订单返回 50001 */
+    @GetMapping("/by-ticket/{ticketId}")
+    public Result<TicketOrderView> byTicket(@PathVariable String ticketId) {
+        return Result.ok(orderService.ticketView(ticketId));
     }
 }

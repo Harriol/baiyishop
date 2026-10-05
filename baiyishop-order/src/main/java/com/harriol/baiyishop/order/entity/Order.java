@@ -36,6 +36,9 @@ public class Order {
     /** CART / BUY_NOW / SECKILL */
     private String source;
 
+    /** 秒杀票据号（仅秒杀订单有值，uk_seckill_ticket 保证一张票据只落一笔订单） */
+    private String seckillTicketId;
+
     /** 商品金额合计（分） */
     private Long totalAmount;
 

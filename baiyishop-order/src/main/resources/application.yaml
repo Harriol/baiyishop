@@ -60,6 +60,10 @@ baiyishop:
     order-auto-receive-topic: baiyishop-order-auto-receive
     # 支付成功事件（payment-service 生产，本服务消费，REQ-802）
     payment-success-topic: baiyishop-payment-success
+    # 秒杀下单消息（seckill-service 生产，本服务消费，REQ-903）
+    seckill-order-topic: baiyishop-seckill-order
+    # 秒杀订单取消（本服务生产，通知 seckill 回补秒杀池，REQ-905）
+    seckill-cancel-topic: baiyishop-seckill-order-cancel
 
 # 分布式事务（ADR-002、docs/architecture.md 6.1）
 seata:

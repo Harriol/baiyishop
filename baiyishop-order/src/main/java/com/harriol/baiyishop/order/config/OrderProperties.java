@@ -16,6 +16,8 @@ import java.time.Duration;
  * @param orderTimeoutTopic 15 分钟未支付自动取消的延时消息 topic（REQ-704）
  * @param orderAutoReceiveTopic 发货 7 天后自动确认收货的延时消息 topic（REQ-707）
  * @param paymentSuccessTopic 支付成功事件 topic（本服务作为消费方，REQ-802）
+ * @param seckillOrderTopic 秒杀下单消息 topic（本服务作为消费方，REQ-903）
+ * @param seckillCancelTopic 秒杀订单取消 topic（本服务作为生产方，通知 seckill 回补，REQ-905）
  */
 @ConfigurationProperties(prefix = "baiyishop.order")
 public record OrderProperties(
@@ -26,5 +28,7 @@ public record OrderProperties(
         @DefaultValue("10") int outboxMaxRetry,
         @DefaultValue("baiyishop-order-timeout") String orderTimeoutTopic,
         @DefaultValue("baiyishop-order-auto-receive") String orderAutoReceiveTopic,
-        @DefaultValue("baiyishop-payment-success") String paymentSuccessTopic) {
+        @DefaultValue("baiyishop-payment-success") String paymentSuccessTopic,
+        @DefaultValue("baiyishop-seckill-order") String seckillOrderTopic,
+        @DefaultValue("baiyishop-seckill-order-cancel") String seckillCancelTopic) {
 }

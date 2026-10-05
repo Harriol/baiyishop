@@ -62,7 +62,16 @@ public enum ErrorCode {
     PAYMENT_NOT_FOUND(60001, "支付单不存在", 200),
     PAYMENT_NOT_ALLOWED(60002, "该订单当前不可支付", 200),
     PAYMENT_AMOUNT_MISMATCH(60003, "支付金额与订单不一致", 200),
-    PAYMENT_SIGN_INVALID(60004, "回调验签失败", 200);
+    PAYMENT_SIGN_INVALID(60004, "回调验签失败", 200),
+
+    // ---- 7xxxx 秒杀 ----
+    SECKILL_ACTIVITY_NOT_FOUND(70001, "秒杀活动不存在", 200),
+    SECKILL_NOT_STARTED(70002, "秒杀尚未开始", 200),
+    SECKILL_ENDED(70003, "秒杀已结束", 200),
+    SECKILL_SOLD_OUT(70004, "秒杀商品已售罄", 200),
+    SECKILL_LIMIT_EXCEEDED(70005, "超出限购数量", 200),
+    SECKILL_SKU_NOT_ON_SALE(70006, "秒杀商品未上架", 200),
+    SECKILL_RECORD_NOT_FOUND(70007, "抢购记录不存在", 200);
 
     private final int code;
     private final String message;

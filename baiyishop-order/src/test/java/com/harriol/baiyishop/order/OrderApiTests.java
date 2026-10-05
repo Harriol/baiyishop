@@ -7,9 +7,12 @@ import com.harriol.baiyishop.common.security.Audience;
 import com.harriol.baiyishop.common.security.jwt.JwtTokenProvider;
 import com.harriol.baiyishop.order.client.InventoryClient;
 import com.harriol.baiyishop.order.client.ProductClient;
+import com.harriol.baiyishop.order.client.SeckillClient;
 import com.harriol.baiyishop.order.client.UserClient;
 import com.harriol.baiyishop.order.domain.OrderStatus;
 import com.harriol.baiyishop.order.dto.AddressSnapshot;
+import com.harriol.baiyishop.order.dto.SeckillOrderEventView;
+import com.harriol.baiyishop.order.dto.SeckillResultRequest;
 import com.harriol.baiyishop.order.dto.SkuSnapshot;
 import com.harriol.baiyishop.order.entity.MqOutbox;
 import com.harriol.baiyishop.order.entity.Order;
@@ -20,6 +23,7 @@ import com.harriol.baiyishop.order.mapper.OrderItemMapper;
 import com.harriol.baiyishop.order.mapper.OrderMapper;
 import com.harriol.baiyishop.order.mapper.OrderStatusLogMapper;
 import com.harriol.baiyishop.order.service.OrderService;
+import com.harriol.baiyishop.order.service.SeckillOrderService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +43,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,6 +93,12 @@ class OrderApiTests {
         UserClient userClient() {
             return Mockito.mock(UserClient.class);
         }
+
+        @Bean
+        @Primary
+        SeckillClient seckillClient() {
+            return Mockito.mock(SeckillClient.class);
+        }
     }
 
     @Autowired
@@ -98,6 +109,12 @@ class OrderApiTests {
 
     @Autowired
     private UserClient userClient;
+
+    @Autowired
+    private SeckillClient seckillClient;
+
+    @Autowired
+    private SeckillOrderService seckillOrderService;
 
     @Autowired
     private OrderService orderService;
@@ -135,6 +152,8 @@ class OrderApiTests {
     private final AtomicInteger lockCalls = new AtomicInteger();
     private final AtomicInteger releaseCalls = new AtomicInteger();
     private final AtomicInteger deductCalls = new AtomicInteger();
+    private final AtomicInteger seckillDeductCalls = new AtomicInteger();
+    private final List<SeckillResultRequest> writtenResults = new ArrayList<>();
     /** 结算页默认地址（地址表按 userId 查，与 addresses 的 key（addressId）不同） */
     private Long defaultAddressId;
 
@@ -151,6 +170,8 @@ class OrderApiTests {
         lockCalls.set(0);
         releaseCalls.set(0);
         deductCalls.set(0);
+        seckillDeductCalls.set(0);
+        writtenResults.clear();
         defaultAddressId = null;
 
         doAnswer(invocation -> {
@@ -175,6 +196,15 @@ class OrderApiTests {
             deductCalls.incrementAndGet();
             return null;
         }).when(inventoryClient).deduct(anyString(), any());
+        doAnswer(invocation -> {
+            seckillDeductCalls.incrementAndGet();
+            return new com.harriol.baiyishop.order.dto.SeckillPoolView(1L, 1L,
+                    invocation.getArgument(1), 1L, 10, 5, 5, LocalDateTime.now());
+        }).when(inventoryClient).deductSeckill(anyString(), anyLong(), org.mockito.ArgumentMatchers.anyInt());
+        doAnswer(invocation -> {
+            writtenResults.add(invocation.getArgument(1));
+            return null;
+        }).when(seckillClient).writeResult(anyString(), any());
         doAnswer(invocation -> Optional.ofNullable(addresses.get(invocation.getArgument(0))))
                 .when(userClient).address(anyLong());
         doAnswer(invocation -> Optional.ofNullable(defaultAddressId).map(addresses::get))
@@ -233,6 +263,13 @@ class OrderApiTests {
         }
         throw new AssertionError("购物车里找不到 skuId=" + skuId);
     }
+
+    /** 造一条秒杀下单消息（seckill-service 预扣成功后投递的内容） */
+    private SeckillOrderEventView seckillEvent(long skuId, int quantity, String ticketId) {
+        return new SeckillOrderEventView(ticketId, ID_BASE + 1, SKU_SEQ.get(), userId, skuId, skuId,
+                quantity, 100L, "SEK-" + ticketId);
+    }
+
 
     private Resp buyNow(long skuId, int quantity, long addressId, String requestId) throws Exception {
         return send("POST", "/api/v1/orders",
@@ -576,6 +613,85 @@ class OrderApiTests {
 
         assertThat(send("GET", "/internal/orders/NOT-EXIST/payable", null, null, null)
                 .json().get("code").asInt()).isEqualTo(50001);
+    }
+
+    @Test
+    @DisplayName("秒杀下单：建单 + 扣减秒杀池（全局事务），并回写结果给秒杀侧（REQ-903）")
+    void seckillOrderCreatesOrderAndWritesBack() throws Exception {
+        long skuId = newSku(9900, 100);
+        newAddress();
+        String ticketId = "TK-SMOKE-" + ID_BASE;
+
+        seckillOrderService.handle(seckillEvent(skuId, 2, ticketId));
+
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getSeckillTicketId, ticketId));
+        assertThat(order).isNotNull();
+        assertThat(order.getSource()).isEqualTo("SECKILL");
+        assertThat(order.getPayAmount()).isEqualTo(200);
+        assertThat(order.getStatus()).isEqualTo("PENDING_PAYMENT");
+        assertThat(order.getTimeoutAt()).isNotNull();
+        assertThat(seckillDeductCalls.get()).isEqualTo(1);
+        assertThat(writtenResults).hasSize(1);
+        assertThat(writtenResults.get(0).status()).isEqualTo("SUCCESS");
+        assertThat(writtenResults.get(0).orderNo()).isEqualTo(order.getOrderNo());
+        assertThat(outboxTopicCount(order.getOrderNo(), "baiyishop-order-timeout")).isEqualTo(1);
+
+        // 重复投递：不再建单，只重写结果
+        seckillOrderService.handle(seckillEvent(skuId, 2, ticketId));
+        assertThat(seckillDeductCalls.get()).isEqualTo(1);
+        assertThat(orderMapper.selectCount(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getSeckillTicketId, ticketId))).isEqualTo(1);
+
+        // 按票据回查（供秒杀对账）
+        JsonNode data = send("GET", "/internal/orders/by-ticket/" + ticketId, null, null, null)
+                .json().get("data");
+        assertThat(data.get("orderNo").asString()).isEqualTo(order.getOrderNo());
+        assertThat(data.get("status").asString()).isEqualTo("PENDING_PAYMENT");
+        assertThat(send("GET", "/internal/orders/by-ticket/TK-NOT-EXIST", null, null, null)
+                .json().get("code").asInt()).isEqualTo(50001);
+    }
+
+    @Test
+    @DisplayName("秒杀下单：没有默认收货地址时明确失败并回写原因，不产生订单")
+    void seckillOrderWithoutAddressFails() throws Exception {
+        long skuId = newSku(9900, 100);
+        // 不创建地址：defaultAddress 返回 empty
+        seckillOrderService.handle(seckillEvent(skuId, 1, "TK-NOADDR-" + ID_BASE));
+
+        assertThat(seckillDeductCalls.get()).isZero();
+        assertThat(writtenResults).hasSize(1);
+        assertThat(writtenResults.get(0).status()).isEqualTo("FAILED");
+        assertThat(writtenResults.get(0).failReason()).isEqualTo("NO_ADDRESS");
+        assertThat(orderMapper.selectCount(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getSource, "SECKILL")
+                .eq(Order::getUserId, userId))).isZero();
+    }
+
+    @Test
+    @DisplayName("秒杀订单取消：不释放普通库存，改为通知秒杀侧回补（REQ-905）")
+    void seckillOrderCancelNotifiesSeckill() throws Exception {
+        long skuId = newSku(9900, 100);
+        newAddress();
+        String ticketId = "TK-CANCEL-" + ID_BASE;
+        seckillOrderService.handle(seckillEvent(skuId, 1, ticketId));
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getSeckillTicketId, ticketId));
+
+        String token = tokenProvider.createAccessToken(userId, Audience.USER, null);
+        assertThat(send("PUT", "/api/v1/orders/" + order.getOrderNo() + "/cancel", null, token, null)
+                .json().get("code").asInt()).isZero();
+
+        // 普通释放没有被调用；而是写了一条「秒杀订单取消」消息
+        assertThat(releaseCalls.get()).isZero();
+        assertThat(outboxTopicCount(order.getOrderNo(), "baiyishop-seckill-order-cancel")).isEqualTo(1);
+        assertThat(orderOf(order.getOrderNo()).getStatus()).isEqualTo("CANCELLED");
+    }
+
+    private long outboxTopicCount(String bizKey, String topic) {
+        return outboxMapper.selectCount(Wrappers.<MqOutbox>lambdaQuery()
+                .eq(MqOutbox::getBizKey, bizKey)
+                .eq(MqOutbox::getTopic, topic));
     }
 
     @Test

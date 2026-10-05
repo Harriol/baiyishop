@@ -27,6 +27,7 @@ import com.harriol.baiyishop.order.dto.SettleRequest;
 import com.harriol.baiyishop.order.dto.SettleView;
 import com.harriol.baiyishop.order.dto.SkuSnapshot;
 import com.harriol.baiyishop.order.dto.StatusLogView;
+import com.harriol.baiyishop.order.dto.TicketOrderView;
 import com.harriol.baiyishop.order.entity.CartItem;
 import com.harriol.baiyishop.order.entity.Order;
 import com.harriol.baiyishop.order.entity.OrderItem;
@@ -78,6 +79,7 @@ public class OrderService {
     private final InventoryClient inventoryClient;
     private final ProductClient productClient;
     private final UserClient userClient;
+    private final SeckillCancelNotifier seckillCancelNotifier;
     private final OrderProperties properties;
 
     public OrderService(OrderMapper orderMapper,
@@ -90,6 +92,7 @@ public class OrderService {
                         InventoryClient inventoryClient,
                         ProductClient productClient,
                         UserClient userClient,
+                        SeckillCancelNotifier seckillCancelNotifier,
                         OrderProperties properties) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
@@ -101,6 +104,7 @@ public class OrderService {
         this.inventoryClient = inventoryClient;
         this.productClient = productClient;
         this.userClient = userClient;
+        this.seckillCancelNotifier = seckillCancelNotifier;
         this.properties = properties;
     }
 
@@ -237,6 +241,16 @@ public class OrderService {
         return PayableOrderView.from(require(orderNo));
     }
 
+    /** 按秒杀票据回查订单（内部接口，供 seckill 对账，REQ-903） */
+    public TicketOrderView ticketView(String ticketId) {
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getSeckillTicketId, ticketId));
+        if (order == null) {
+            throw new BizException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        return new TicketOrderView(order.getOrderNo(), order.getStatus());
+    }
+
     // ==================== 状态流转（REQ-703 ~ REQ-707） ====================
 
     /** 用户取消订单：仅待付款可取消（REQ-705），取消与超时并发时只有一方成功 */
@@ -256,7 +270,7 @@ public class OrderService {
         if (rows == 0) {
             throw new BizException(ErrorCode.ORDER_STATUS_NOT_ALLOWED);
         }
-        inventoryClient.release(orderNo, inventoryItems(orderNo));
+        releaseStock(order, REASON_USER_CANCEL);
         writeStatusLog(order, OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED,
                 OrderStatusLog.OPERATOR_USER, userId, REASON_USER_CANCEL);
     }
@@ -283,7 +297,7 @@ public class OrderService {
         if (rows == 0) {
             return;
         }
-        inventoryClient.release(orderNo, inventoryItems(orderNo));
+        releaseStock(order, REASON_TIMEOUT);
         writeStatusLog(order, OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED,
                 OrderStatusLog.OPERATOR_SYSTEM, null, REASON_TIMEOUT);
         log.info("订单超时取消并释放库存 orderNo={}", orderNo);
@@ -454,6 +468,19 @@ public class OrderService {
                 .stream()
                 .map(item -> new InventoryOpItem(item.getSkuId(), item.getQuantity()))
                 .toList();
+    }
+
+    /**
+     * 取消 / 超时释放库存：普通订单直接释放回可售，**秒杀订单交给 seckill 回补秒杀池**（REQ-905）。
+     * <p>秒杀库存不在普通可售里，用常规释放会把它还错地方，所以这里按 source 分流。
+     */
+    private void releaseStock(Order order, String reason) {
+        if (OrderSource.SECKILL.name().equals(order.getSource())) {
+            seckillCancelNotifier.append(order.getOrderNo());
+            log.info("秒杀订单取消，已通知秒杀侧回补 orderNo={} reason={}", order.getOrderNo(), reason);
+            return;
+        }
+        inventoryClient.release(order.getOrderNo(), inventoryItems(order.getOrderNo()));
     }
 
     private Optional<OrderRequest> findByRequestId(String requestId) {
