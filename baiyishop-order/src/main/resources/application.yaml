@@ -39,6 +39,27 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+# RocketMQ：下单后的延时取消与发货后的自动收货（docs/architecture.md 5.3）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:9876}
+  producer:
+    group: baiyishop-order
+
+baiyishop:
+  order:
+    # 单品限购数量（购物车累加与下单数量都受它约束，REQ-601）
+    max-quantity-per-sku: 99
+    # 未支付自动取消时长（REQ-704）
+    pay-timeout: 15m
+    # 发货后自动确认收货时长（REQ-707）
+    auto-receive-after: 7d
+    # 延时消息丢失时的兜底扫描间隔
+    timeout-scan-delay: 5m
+    outbox-max-retry: 10
+  mq:
+    order-timeout-topic: baiyishop-order-timeout
+    order-auto-receive-topic: baiyishop-order-auto-receive
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

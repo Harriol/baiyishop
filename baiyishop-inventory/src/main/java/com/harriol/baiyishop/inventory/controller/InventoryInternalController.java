@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 库存内部接口（docs/api.md 第 6 章），仅供服务间调用。
  * <p>网关对外部请求一律返回 404（架构 4.3），因此这里不做令牌校验 —— 调用方是
@@ -56,6 +58,12 @@ public class InventoryInternalController {
     @GetMapping("/skus/{skuId}")
     public Result<StockAvailable> available(@PathVariable Long skuId) {
         return Result.ok(inventoryService.available(skuId));
+    }
+
+    /** 批量只读库存，供 order-service 渲染购物车（一次取回，避免 N+1） */
+    @GetMapping("/skus/available")
+    public Result<List<StockAvailable>> availableBatch(@RequestParam List<Long> skuIds) {
+        return Result.ok(inventoryService.availableBatch(skuIds));
     }
 
     // ---------------- 秒杀库存池（REQ-504、REQ-905） ----------------

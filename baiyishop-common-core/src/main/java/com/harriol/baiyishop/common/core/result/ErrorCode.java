@@ -47,7 +47,16 @@ public enum ErrorCode {
     INVENTORY_NOT_FOUND(40002, "库存记录不存在", 200),
     INVALID_STOCK_ADJUSTMENT(40003, "库存调整数量非法", 200),
     SECKILL_STOCK_POOL_NOT_FOUND(40004, "秒杀库存池不存在", 200),
-    ALLOCATION_EXCEEDS_AVAILABLE(40005, "划拨数量超过当前可售库存", 200);
+    ALLOCATION_EXCEEDS_AVAILABLE(40005, "划拨数量超过当前可售库存", 200),
+
+    // ---- 5xxxx 购物车与订单 ----
+    ORDER_NOT_FOUND(50001, "订单不存在", 200),
+    ORDER_STATUS_NOT_ALLOWED(50002, "当前订单状态不支持该操作", 200),
+    CART_ITEM_INVALID(50003, "部分商品已失效，请重新选择", 200),
+    CART_EMPTY_CHECKED(50004, "请选择要结算的商品", 200),
+    ORDER_ADDRESS_REQUIRED(50005, "请选择收货地址", 200),
+    CART_QUANTITY_EXCEEDED(50006, "超出单品限购数量", 200),
+    CART_ITEM_NOT_FOUND(50007, "购物车条目不存在", 200);
 
     private final int code;
     private final String message;
@@ -69,5 +78,18 @@ public enum ErrorCode {
 
     public int getHttpStatus() {
         return httpStatus;
+    }
+
+    /**
+     * 按错误码反查枚举，用于**原样透传**内部服务返回的业务码（如库存 40001、商品 30007）。
+     * <p>未知码归入系统错误，避免把上游的陌生码直接抛给前端。
+     */
+    public static ErrorCode of(int code) {
+        for (ErrorCode value : values()) {
+            if (value.code == code) {
+                return value;
+            }
+        }
+        return SYSTEM_ERROR;
     }
 }

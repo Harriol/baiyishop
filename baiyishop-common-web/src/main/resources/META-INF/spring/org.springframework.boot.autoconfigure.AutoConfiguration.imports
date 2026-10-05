@@ -1,1 +1,2 @@
 com.harriol.baiyishop.common.web.config.CommonWebAutoConfiguration
+com.harriol.baiyishop.common.web.config.InternalClientAutoConfiguration
