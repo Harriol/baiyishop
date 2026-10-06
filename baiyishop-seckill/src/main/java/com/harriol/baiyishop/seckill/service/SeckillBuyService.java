@@ -96,6 +96,10 @@ public class SeckillBuyService {
 
         SeckillActivitySku activitySku = requireActivitySku(activitySkuId);
         SeckillActivity activity = activityService.require(activitySku.getActivityId());
+        if (SeckillActivity.STATUS_ENDED.equals(activity.getStatus())) {
+            // 状态可能比时间窗更早变化（后台提前结束活动），以状态为准先拒掉
+            throw new BizException(ErrorCode.SECKILL_ENDED);
+        }
 
         // ③ 商品必须仍可售：避免给已下架的商品发券
         SkuSnapshot sku = productClient.sku(activitySku.getSkuId());

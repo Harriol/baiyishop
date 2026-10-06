@@ -19,6 +19,7 @@ import com.harriol.baiyishop.seckill.mapper.SeckillActivitySkuMapper;
 import com.harriol.baiyishop.seckill.mapper.SeckillRecordMapper;
 import com.harriol.baiyishop.seckill.redis.SeckillStockRedis;
 import com.harriol.baiyishop.seckill.service.SeckillResultService;
+import com.harriol.baiyishop.seckill.service.SeckillReconcileJob;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -113,6 +114,9 @@ class SeckillApiTests {
     private SeckillResultService resultService;
 
     @Autowired
+    private SeckillReconcileJob reconcileJob;
+
+    @Autowired
     private Environment environment;
 
     @Autowired
@@ -124,12 +128,19 @@ class SeckillApiTests {
     private HttpClient http;
     private String base;
     private String adminToken;
+    /** 对账用例用的「池子剩余量」替身数据与回补记录 */
+    private final java.util.Map<Long, Integer> stubPoolRemaining = new java.util.HashMap<>();
+    private final java.util.List<Long> returnedActivitySkus = new java.util.ArrayList<>();
+    private String stubOrderNoOfTicket;
 
     @BeforeEach
     void setUp() {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         base = "http://localhost:" + environment.getProperty("local.server.port");
         adminToken = tokenProvider.createAccessToken(1001L, Audience.ADMIN, ADMIN_TOKEN_ROLE);
+        stubPoolRemaining.clear();
+        returnedActivitySkus.clear();
+        stubOrderNoOfTicket = null;
 
         doAnswer(invocation -> {
             SkuSnapshot snapshot = new SkuSnapshot((Long) invocation.getArgument(0),
@@ -141,8 +152,20 @@ class SeckillApiTests {
             AllocateStockRequest request = invocation.getArgument(0);
             return pool(request.activitySkuId(), request.quantity());
         }).when(inventoryClient).allocate(any());
-        doAnswer(invocation -> pool(1L, 0)).when(inventoryClient).returnStock(any());
-        doAnswer(invocation -> pool(invocation.getArgument(0), null)).when(inventoryClient).pool(anyLong());
+        doAnswer(invocation -> {
+            com.harriol.baiyishop.seckill.dto.ReturnStockRequest request = invocation.getArgument(0);
+            returnedActivitySkus.add(request.activitySkuId());
+            return pool(request.activitySkuId(), stubPoolRemaining.get(request.activitySkuId()));
+        }).when(inventoryClient).returnStock(any());
+        doAnswer(invocation -> pool(invocation.getArgument(0),
+                stubPoolRemaining.get((Long) invocation.getArgument(0)))).when(inventoryClient).pool(anyLong());
+        // poolOrNull 是具体方法，Mockito 会直接拦它 —— 对账用例走的是这个入口，必须一起替身
+        doAnswer(invocation -> {
+            Long activitySkuId = invocation.getArgument(0);
+            Integer remaining = stubPoolRemaining.get(activitySkuId);
+            return remaining == null ? null : pool(activitySkuId, remaining);
+        }).when(inventoryClient).poolOrNull(anyLong());
+        doAnswer(invocation -> stubOrderNoOfTicket).when(orderClient).orderNoOfTicket(anyString());
     }
 
     private SeckillPoolView pool(long activitySkuId, Integer remaining) {
@@ -397,4 +420,142 @@ class SeckillApiTests {
     private long activityIdOf(long activitySkuId) {
         return activitySkuMapper.selectById(activitySkuId).getActivityId();
     }
+
+    // ==================== 活动生命周期与对账 ====================
+
+    @Test
+    @DisplayName("修改活动：仅未开始可改，且只改名称与起止时间；改完 Redis 用新时间生效")
+    void updateActivityOnlyWhenNotStarted() throws Exception {
+        String skuId = String.valueOf(SKU_SEQ.get());
+        String start = LocalDateTime.now().plusHours(1).format(TIME);
+        String end = LocalDateTime.now().plusHours(2).format(TIME);
+        JsonNode created = send("POST", "/api/v1/admin/seckill/activities",
+                "{\"name\":\"待改活动\",\"startTime\":\"" + start + "\",\"endTime\":\"" + end
+                        + "\",\"skus\":[{\"skuId\":" + skuId + ",\"seckillPrice\":100,\"allocStock\":2}]}",
+                adminToken, null).json().get("data");
+        long activityId = created.get("id").asLong();
+        long activitySkuId = created.get("skus").get(0).get("id").asLong();
+
+        // 未开始的活动可以改名与改时间
+        String newStart = LocalDateTime.now().minusMinutes(1).format(TIME);
+        String newEnd = LocalDateTime.now().plusHours(3).format(TIME);
+        JsonNode updated = send("PUT", "/api/v1/admin/seckill/activities/" + activityId,
+                "{\"name\":\"已改名活动\",\"startTime\":\"" + newStart + "\",\"endTime\":\"" + newEnd + "\"}",
+                adminToken, null).json().get("data");
+        assertThat(updated.get("name").asString()).isEqualTo("已改名活动");
+        assertThat(updated.get("status").asString()).isEqualTo("RUNNING");
+        // 用新的时间窗抢购：已开始 → 可以抢（说明 Redis 里的时间已按新值生效）
+        assertThat(buy(activitySkuId, 1, userToken(), "SEK-UPD-" + activitySkuId).json().get("code").asInt())
+                .isZero();
+
+        // 进行中的活动不能再改
+        assertThat(send("PUT", "/api/v1/admin/seckill/activities/" + activityId,
+                "{\"name\":\"x\",\"startTime\":\"" + newStart + "\",\"endTime\":\"" + newEnd + "\"}",
+                adminToken, null).json().get("code").asInt()).isEqualTo(10001);
+    }
+
+    @Test
+    @DisplayName("结束活动：未售出回补普通库存，重复结束不重复回补，结束后不可抢购")
+    void endActivityReturnsUnsold() throws Exception {
+        long activitySkuId = createRunningActivity(3, 1);
+        long activityId = activityIdOf(activitySkuId);
+        assertThat(buy(activitySkuId, 1, userToken(), "SEK-END1-" + activitySkuId).json().get("code").asInt())
+                .isZero();
+        int returnsBefore = returnedActivitySkus.size();
+
+        assertThat(send("PUT", "/api/v1/admin/seckill/activities/" + activityId + "/status", null, adminToken, null)
+                .json().get("code").asInt()).isZero();
+        assertThat(returnedActivitySkus).hasSize(returnsBefore + 1);
+        assertThat(send("GET", "/api/v1/seckill/activities/" + activityId, null, null, null)
+                .json().get("data").get("status").asString()).isEqualTo("ENDED");
+
+        // 重复结束：状态已是 ENDED，直接返回、不再回补
+        send("PUT", "/api/v1/admin/seckill/activities/" + activityId + "/status", null, adminToken, null);
+        assertThat(returnedActivitySkus).hasSize(returnsBefore + 1);
+        assertThat(buy(activitySkuId, 1, userToken(), "SEK-END2-" + activitySkuId).json().get("code").asInt())
+                .isEqualTo(70003);
+    }
+
+    @Test
+    @DisplayName("删除活动：未开始可删并回补，进行中不可删")
+    void deleteActivityRules() throws Exception {
+        String skuId = String.valueOf(SKU_SEQ.get());
+        long activityId = send("POST", "/api/v1/admin/seckill/activities",
+                "{\"name\":\"待删活动\",\"startTime\":\""
+                        + LocalDateTime.now().plusHours(1).format(TIME) + "\",\"endTime\":\""
+                        + LocalDateTime.now().plusHours(2).format(TIME) + "\",\"skus\":[{\"skuId\":" + skuId
+                        + ",\"seckillPrice\":100,\"allocStock\":2}]}", adminToken, null)
+                .json().get("data").get("id").asLong();
+        assertThat(send("DELETE", "/api/v1/admin/seckill/activities/" + activityId, null, adminToken, null)
+                .json().get("code").asInt()).isZero();
+        assertThat(send("GET", "/api/v1/admin/seckill/activities/" + activityId, null, adminToken, null)
+                .json().get("code").asInt()).isEqualTo(70001);
+
+        long runningId = activityIdOf(createRunningActivity(2, 1));
+        assertThat(send("DELETE", "/api/v1/admin/seckill/activities/" + runningId, null, adminToken, null)
+                .json().get("code").asInt()).isEqualTo(10001);
+    }
+
+    @Test
+    @DisplayName("对账：排队超时但订单其实已落成 → 补写成功；订单不存在 → 回补 Redis 并置失败")
+    void reconcileQueuedRecords() throws Exception {
+        long activitySkuId = createRunningActivity(5, 1);
+        String token = userToken();
+        String ticketId = buy(activitySkuId, 1, token, "SEK-REC-" + activitySkuId)
+                .json().get("data").get("ticketId").asString();
+        // 把记录的创建时间拨到过去，让它进入对账窗口
+        recordMapper.update(null, Wrappers.<SeckillRecord>lambdaUpdate()
+                .eq(SeckillRecord::getTicketId, ticketId)
+                .set(SeckillRecord::getCreatedAt, LocalDateTime.now().minusMinutes(10)));
+
+        // 场景一：订单其实已落成，只是回写失败 → 对账补写成功，不回补
+        stubOrderNoOfTicket = "20261006000000000001";
+        int stockBefore = stockRedis.stockOf(activitySkuId);
+        reconcileJob.reconcile();
+        SeckillRecord reconciled = recordMapper.selectOne(Wrappers.<SeckillRecord>lambdaQuery()
+                .eq(SeckillRecord::getTicketId, ticketId));
+        assertThat(reconciled.getStatus()).isEqualTo("SUCCESS");
+        assertThat(reconciled.getOrderNo()).isEqualTo("20261006000000000001");
+        assertThat(stockRedis.stockOf(activitySkuId)).isEqualTo(stockBefore);
+
+        // 场景二：没有订单 → 回补 Redis 并置 FAILED
+        String secondTicket = buy(activitySkuId, 1, userToken(), "SEK-REC2-" + activitySkuId)
+                .json().get("data").get("ticketId").asString();
+        recordMapper.update(null, Wrappers.<SeckillRecord>lambdaUpdate()
+                .eq(SeckillRecord::getTicketId, secondTicket)
+                .set(SeckillRecord::getCreatedAt, LocalDateTime.now().minusMinutes(10)));
+        stubOrderNoOfTicket = null;
+        reconcileJob.reconcile();
+        SeckillRecord failed = recordMapper.selectOne(Wrappers.<SeckillRecord>lambdaQuery()
+                .eq(SeckillRecord::getTicketId, secondTicket));
+        assertThat(failed.getStatus()).isEqualTo("FAILED");
+        assertThat(failed.getFailReason()).isEqualTo("SYSTEM_ERROR");
+    }
+
+    @Test
+    @DisplayName("对账：Redis 库存偏大时按池子压回去；偏小时不动（可能是在途预扣）")
+    void reconcileRedisOnlyShrinks() throws Exception {
+        long activitySkuId = createRunningActivity(5, 1);
+        long activityId = activityIdOf(activitySkuId);
+
+        // 偏大：Redis 认为 5，池子只有 2 → 应被压到 2
+        stubPoolRemaining.put(activitySkuId, 2);
+        stockRedis.resetStock(activitySkuId, 5, java.time.Duration.ofHours(1));
+        reconcileJob.reconcile();
+        assertThat(stockRedis.stockOf(activitySkuId)).isEqualTo(2);
+
+        // 偏小：Redis 1、池子 3 → 不动（可能只是预扣了还没落单）
+        stubPoolRemaining.put(activitySkuId, 3);
+        stockRedis.resetStock(activitySkuId, 1, java.time.Duration.ofHours(1));
+        reconcileJob.reconcile();
+        assertThat(stockRedis.stockOf(activitySkuId)).isEqualTo(1);
+
+        // 键丢失：按池子重新预热
+        stubPoolRemaining.put(activitySkuId, 3);
+        stockRedis.clear(activitySkuId);
+        reconcileJob.reconcile();
+        assertThat(stockRedis.stockOf(activitySkuId)).isEqualTo(3);
+        assertThat(activityId).isPositive();
+    }
+
 }

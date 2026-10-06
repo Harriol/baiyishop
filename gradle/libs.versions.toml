@@ -14,6 +14,8 @@ jjwt = "0.12.7"
 # 而 9.x 客户端发的 compatible-with=9 头会被 8.11.3 服务器拒绝（400），
 # 故自行锁定为与 deploy 中 ES 服务器一致的 8.11.3。
 elasticsearch-client = "8.11.3"
+# 覆盖率工具（NFR：核心模块 ≥80%）
+jacoco = "0.8.13"
 
 [libraries]
 # --- Spring Cloud / Alibaba（BOM） ---

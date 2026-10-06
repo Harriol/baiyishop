@@ -27,13 +27,13 @@ public class SeckillStockRedis {
 
     /** 预扣：KEYS[1]=库存 KEYS[2]=已购 KEYS[3]=活动元信息 ARGV=nowMs,quantity,limit,ttlSeconds */
     private static final RedisScript<Long> DEDUCT_SCRIPT = new DefaultRedisScript<>("""
-            local stock = redis.call('GET', KEYS[1])
-            if not stock then return -1 end
             local startMs = tonumber(redis.call('HGET', KEYS[3], 'startMs') or '0')
             local endMs = tonumber(redis.call('HGET', KEYS[3], 'endMs') or '0')
             local nowMs = tonumber(ARGV[1])
             if startMs > 0 and nowMs < startMs then return 2 end
             if endMs > 0 and nowMs > endMs then return 3 end
+            local stock = redis.call('GET', KEYS[1])
+            if not stock then return -1 end
             local quantity = tonumber(ARGV[2])
             if tonumber(stock) < quantity then return 1 end
             local bought = tonumber(redis.call('GET', KEYS[2]) or '0')
@@ -95,6 +95,15 @@ public class SeckillStockRedis {
         return Boolean.TRUE.equals(redis.hasKey(SeckillRedisKeys.stock(activitySkuId)));
     }
 
+    /**
+     * 强制把库存键重置为指定值（对账用）。
+     * <p>与 {@link #warmUp} 的区别：预热**只在键不存在时写**（避免把进行中已扣减的库存重置回初始值），
+     * 而对账要的就是覆盖 —— 当 Redis 认为的库存比池子实际可售还多时，必须把它压回去。
+     */
+    public void resetStock(long activitySkuId, int stock, Duration ttl) {
+        redis.opsForValue().set(SeckillRedisKeys.stock(activitySkuId), String.valueOf(stock), ttl);
+    }
+
     public Integer stockOf(long activitySkuId) {
         String value = redis.opsForValue().get(SeckillRedisKeys.stock(activitySkuId));
         return value == null ? null : Integer.valueOf(value);
@@ -103,6 +112,16 @@ public class SeckillStockRedis {
     /** 清掉某个活动 SKU 的预扣数据（活动删除 / 重建时用） */
     public void clear(long activitySkuId) {
         redis.delete(SeckillRedisKeys.stock(activitySkuId));
+    }
+
+    /**
+     * 后台把活动提前结束：把 Redis 里的活动标记为「已结束」，并清掉该 SKU 的库存键。
+     * <p>不然活动虽然在前台显示已结束，抢购请求仍会按原结束时间放行（Lua 里校验的是缓存时间）。
+     */
+    public void closeActivity(long activityId, long activitySkuId) {
+        redis.opsForHash().put(SeckillRedisKeys.activity(activityId), "endMs",
+                String.valueOf(System.currentTimeMillis() - 1));
+        clear(activitySkuId);
     }
 
     public long deduct(long activityId, long activitySkuId, long userId, int quantity, int limitPerUser,

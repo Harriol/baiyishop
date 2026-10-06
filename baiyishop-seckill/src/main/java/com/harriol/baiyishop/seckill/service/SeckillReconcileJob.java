@@ -106,19 +106,21 @@ public class SeckillReconcileJob {
             for (SeckillActivitySku sku : activityService.skusOf(activity.getId())) {
                 try {
                     Integer redisStock = stockRedis.stockOf(sku.getId());
+                    SeckillPoolView pool = inventoryClient.poolOrNull(sku.getId());
                     if (redisStock == null) {
-                        // Redis 丢了（重启 / 淘汰）：按权威值重新预热
+                        // Redis 丢了（重启 / 淘汰）：按权威值重新预热。
+                        // 优先用池子的剩余量而不是活动配置的划拨量 —— 已售出的部分不能再放出来
+                        int stock = pool == null || pool.remaining() == null
+                                ? sku.getAllocStock() : pool.remaining();
+                        stockRedis.resetStock(sku.getId(), stock, java.time.Duration.ofDays(1));
                         activityService.warmUp(activity, List.of(sku));
                         continue;
                     }
-                    SeckillPoolView pool = inventoryClient.poolOrNull(sku.getId());
                     if (pool == null || pool.remaining() == null) {
                         continue;
                     }
                     if (redisStock > pool.remaining()) {
-                        stockRedis.warmUp(activity.getId(), sku.getId(), pool.remaining(),
-                                epochMillis(activity.getStartTime()), epochMillis(activity.getEndTime()),
-                                java.time.Duration.ofDays(1));
+                        stockRedis.resetStock(sku.getId(), pool.remaining(), java.time.Duration.ofDays(1));
                         log.warn("Redis 秒杀库存偏大已按池子修正 activitySkuId={} redis={} pool={}",
                                 sku.getId(), redisStock, pool.remaining());
                     }

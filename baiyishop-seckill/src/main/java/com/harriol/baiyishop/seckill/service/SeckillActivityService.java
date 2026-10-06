@@ -161,6 +161,8 @@ public class SeckillActivityService {
         }
         List<SeckillActivitySku> skus = skusOf(id);
         returnUnsold(activity, skus);
+        // 同步把 Redis 标记为已结束，否则抢购会按原结束时间继续放行
+        skus.forEach(sku -> stockRedis.closeActivity(activity.getId(), sku.getId()));
         activityMapper.update(null, Wrappers.<SeckillActivity>lambdaUpdate()
                 .eq(SeckillActivity::getId, id)
                 .set(SeckillActivity::getStatus, SeckillActivity.STATUS_ENDED));
@@ -228,6 +230,10 @@ public class SeckillActivityService {
     /** 预热：写入活动时间与初始库存，供 Lua 原子判定使用（ADR-008） */
     void warmUp(SeckillActivity activity, List<SeckillActivitySku> skus) {
         if (activity.getStartTime() == null || activity.getEndTime() == null) {
+            return;
+        }
+        if (SeckillActivity.STATUS_ENDED.equals(activity.getStatus())) {
+            // 已结束的活动不再预热：否则会把 Redis 里的结束标记又改回未来的结束时间，等于重新开卖
             return;
         }
         long startMs = toEpochMillis(activity.getStartTime());
