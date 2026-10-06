@@ -70,7 +70,8 @@ public class InventoryClient {
      * <p>库存不足（池子已被别的请求扣完）时 inventory 返回 40001，调用方按「抢购失败」回写并回补 Redis。
      */
     public SeckillPoolView deductSeckill(String orderNo, long activitySkuId, int quantity) {
-        return client.post("/internal/inventory/seckill/deduct?activitySkuId=" + activitySkuId
+        // orderNo 参与幂等键：链路层失败重试不会重复扣减
+        return client.postIdempotent("/internal/inventory/seckill/deduct?activitySkuId=" + activitySkuId
                 + "&quantity=" + quantity + "&orderNo=" + orderNo, null, SeckillPoolView.class);
     }
 
@@ -81,7 +82,8 @@ public class InventoryClient {
     }
 
     private InventoryOpResult post(String path, String orderNo, List<InventoryOpItem> items, Long productId) {
-        InventoryOpResult result = client.post(path, new InventoryOpRequest(orderNo, productId, items),
+        // 幂等键是 orderNo：重试不会重复锁定 / 扣减 / 释放（REQ-503）
+        InventoryOpResult result = client.postIdempotent(path, new InventoryOpRequest(orderNo, productId, items),
                 InventoryOpResult.class);
         return result == null ? new InventoryOpResult(true, false, List.of()) : result;
     }

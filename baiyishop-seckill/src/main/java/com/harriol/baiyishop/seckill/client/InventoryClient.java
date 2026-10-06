@@ -27,12 +27,14 @@ public class InventoryClient {
 
     /** 划拨普通库存到秒杀池：划拨即扣减普通库存（REQ-504） */
     public SeckillPoolView allocate(AllocateStockRequest request) {
-        return client.post("/internal/inventory/seckill/allocate", request, SeckillPoolView.class);
+        // batchNo 参与幂等键：重试不会重复划拨
+        return client.postIdempotent("/internal/inventory/seckill/allocate", request, SeckillPoolView.class);
     }
 
     /** 回补：UNSOLD 活动结束回补普通库存 / ROLLBACK 取消回滚到秒杀池 */
     public SeckillPoolView returnStock(ReturnStockRequest request) {
-        return client.post("/internal/inventory/seckill/return", request, SeckillPoolView.class);
+        // batchNo / orderNo 参与幂等键：重试不会重复回补
+        return client.postIdempotent("/internal/inventory/seckill/return", request, SeckillPoolView.class);
     }
 
     /** 秒杀池现状（展示剩余量 / 对账用） */

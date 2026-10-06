@@ -35,3 +35,26 @@ powershell ... -File scripts/smoke-all.ps1 -SkipMiddleware     # 中间件已在
 
 - `gradlew test`：模块内测试（Mockito 替身 + 真实中间件），175 例，覆盖业务规则与边界
 - `scripts/smoke-all.ps1`：跨服务端到端，验证「真实链路 + 真实中间件」下的主路径与关键异常路径
+
+## 性能压测（NFR-01）
+
+```powershell
+# 前置：服务已在运行（scripts/smoke-all.ps1 -SkipBuild -KeepRunning -Only None）
+powershell -ExecutionPolicy Bypass -File scripts/run-load-test.ps1
+
+# 只想重跑某一轮
+powershell ... -SkipPrepare                       # 复用已造的压测数据
+powershell ... -SkipBaseline                      # 只跑秒杀那一轮
+powershell ... -OnlyPrepare                       # 只造数据（1000 用户 + 令牌 + 秒杀活动）
+```
+
+| 文件 | 作用 |
+| --- | --- |
+| `jmeter/PrepareLoadTest.java` | 造 1000 个用户+地址、走真实登录拿 1000 个令牌、建秒杀活动（划拨 1000）、导出基线商品 id |
+| `jmeter/api-baseline.jmx` | 基线计划：200 并发 60s，混合只读接口（商品详情/搜索/首页/分类树），断言业务码 0 |
+| `jmeter/seckill-buy.jmx` | 秒杀计划：1000 并发抢购，参数化用户令牌与活动 SKU，提取业务码到 JTL |
+| `jmeter/VerifyLoadTest.java` | 压测后核对：秒杀池 sold 是否等于 SUCCESS 记录数（不超卖判定） |
+| `run-load-test.ps1` | 编排上述步骤，产出 JTL + JMeter HTML 报告到 `docs/load-test/` |
+
+JMeter 需要单独安装（默认路径 `D:\tools_app\apache-jmeter-5.6.3`，用 `-JmeterHome` 覆盖）。
+注意：压测器与被测服务在同一台机器时会互相抢资源，容量结论必须在环境分离后重测。

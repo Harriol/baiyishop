@@ -27,7 +27,8 @@ public class SeckillClient {
 
     public void writeResult(String ticketId, SeckillResultRequest request) {
         try {
-            client.post("/internal/seckill/records/" + ticketId + "/result", request, Void.class);
+            // 幂等：秒杀侧按票据状态判断，重复回写是空操作
+            client.postIdempotent("/internal/seckill/records/" + ticketId + "/result", request, Void.class);
         } catch (RuntimeException ex) {
             log.warn("回写抢购结果失败，等待 seckill 侧对账补齐 ticketId={} status={}", ticketId, request.status(), ex);
         }

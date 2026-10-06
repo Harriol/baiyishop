@@ -24,4 +24,8 @@ dependencies {
 
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")
     annotationProcessor("org.springframework.boot:spring-boot-autoconfigure-processor")
+
+    testImplementation(libs.boot.test)
+    // 纯库模块（没应用 Spring Boot 插件）需要显式引入 launcher，Gradle 才能跑 JUnit Platform
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
