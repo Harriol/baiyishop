@@ -129,6 +129,23 @@ class InventoryApiTests {
     }
 
     @Test
+    @DisplayName("非法 SKU（0 / 负数）：按参数错误拒绝，不打到数据库也不留脏数据")
+    void invalidSkuIdIsRejected() throws Exception {
+        Resp zero = send("PUT", "/api/v1/admin/inventory/0/adjust",
+                "{\"delta\":10,\"reason\":\"非法 SKU\"}", operatorToken);
+        assertThat(zero.json().get("code").asInt()).isEqualTo(10001);
+
+        Resp negative = send("PUT", "/api/v1/admin/inventory/-1/adjust",
+                "{\"delta\":10,\"reason\":\"非法 SKU\"}", operatorToken);
+        assertThat(negative.json().get("code").asInt()).isEqualTo(10001);
+
+        // 锁定接口同样被拦（内部接口也走同一层校验）
+        Resp lock = send("POST", "/internal/inventory/lock",
+                "{\"orderNo\":\"" + orderNo() + "\",\"items\":[{\"skuId\":0,\"quantity\":1}]}", null);
+        assertThat(lock.json().get("code").asInt()).isEqualTo(10001);
+    }
+
+    @Test
     @DisplayName("下单锁定：可售减少、锁定增加，流水类型为 LOCK")
     void lockMovesStockToLocked() throws Exception {
         long skuId = skuWithStock(50);

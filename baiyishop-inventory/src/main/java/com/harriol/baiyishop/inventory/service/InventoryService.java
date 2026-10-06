@@ -400,6 +400,11 @@ public class InventoryService {
      * 而不是含义模糊的「库存记录不存在」。
      */
     private Inventory getOrCreate(Long skuId, Long productId) {
+        if (skuId == null || skuId <= 0) {
+            // 非法 SKU：直接按参数错误拒绝。放过去会拿负数当自增主键插库，
+            // 在 BIGINT UNSIGNED 上触发数据截断，最终变成一个含义不明的 500
+            throw new BizException(ErrorCode.PARAM_INVALID, "SKU 不存在");
+        }
         Inventory inventory = inventoryMapper.selectOne(
                 Wrappers.<Inventory>lambdaQuery().eq(Inventory::getSkuId, skuId));
         if (inventory != null) {

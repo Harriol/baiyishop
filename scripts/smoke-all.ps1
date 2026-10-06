@@ -51,6 +51,7 @@ $services = @(
 
 $smokeScripts = @(
     @{ name = 'MainPath'; file = 'MainPathSmoke.java'; desc = '贯通主路径：注册→加购→下单→支付→发货→收货（经网关）' },
+    @{ name = 'Checklist'; file = 'ChecklistSmoke.java'; desc = '手工冒烟清单走查：主流程 + 权限 + 表单校验 + 错误提示（44 项）' },
     @{ name = 'Search';   file = 'SearchSmoke.java';   desc = '搜索索引同步与全量重建' },
     @{ name = 'Order';    file = 'OrderSmoke.java';    desc = '下单锁库存与 Seata 全局回滚' },
     @{ name = 'Pay';      file = 'PaySmoke.java';      desc = '支付、伪造回调被拒、重复支付幂等' },
