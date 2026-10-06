@@ -116,12 +116,13 @@ window.Store = (function () {
       notify();
       return Promise.resolve(null);
     }
-    return Api.profile().then(function (profile) {
+    // silent：令牌过期时只清会话按游客展示，不把首页/分类页弹去登录页
+    return Api.profile({ silent: true }).then(function (profile) {
       user = profile;
       notify();
       return profile;
     }, function () {
-      user = Api.user();
+      user = null;
       notify();
       return null;
     });

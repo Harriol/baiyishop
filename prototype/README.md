@@ -18,9 +18,13 @@ npm run dev        # http://localhost:5173
 
 | 入口 | 地址 | 联调账号 |
 | --- | --- | --- |
-| 用户端 Web | `http://localhost:5173/index.html` | 自行注册（注册即登录） |
-| 运营后台 | `http://localhost:5173/admin/login.html` | `smokeadmin / Admin@2026`（超管）、`check_service / Admin@2026`（客服） |
+| 用户端 Web | `http://localhost:5173/index.html` | `buyer01 / Demo@2026`（也可自行注册） |
+| 运营后台 | `http://localhost:5173/admin/login.html` | 超管 `demo_admin`、运营 `demo_operator`、客服 `demo_service`，密码均 `Admin@2026` |
 | 小程序原型 | `http://localhost:5173/miniapp/index.html` | 「我的 → 微信授权登录」 |
+
+演示数据由 `scripts/reset-demo-data.ps1` 生成（三级分类 8/21/28、5 个品牌、4 个参数模板、42 个商品与
+默认 SKU、库存含 3 条低库存预警、首页轮播/公告/金刚区/4 个楼层、3 笔不同状态的订单、2 个秒杀场次）。
+清库重来或想恢复这套数据，重跑一次该脚本即可。
 
 也可以直接双击 HTML 打开（file://）——页面本身能渲染，但 `/api` 请求没有代理会失败，所以联调请用 `npm run dev`。
 
@@ -88,7 +92,7 @@ start "" "http://localhost:5173/miniapp/index.html"
 | `admin/seckill.html` | 秒杀活动：场次列表 + 新增活动 + 结束并回补库存 | REQ-901、REQ-504 |
 | `admin/admins.html` | 管理员与角色：账号管理 + 角色分配 + 权限矩阵 | REQ-106 |
 
-**RBAC（真实权限）**：角色由后台账号自身决定，不再有演示切换器。用 `check_service / Admin@2026` 登录后台（客服）后：
+**RBAC（真实权限）**：角色由后台账号自身决定，不再有演示切换器。用 `demo_service / Admin@2026` 登录后台（客服）后：
 
 - 侧边栏只有「订单管理」可用，其余模块显示为锁定
 - 直接打开商品 / 库存 / 首页配置等页面会看到 **403 无权限**页

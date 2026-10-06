@@ -158,9 +158,12 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     mountIcons(document.getElementById("content"));
 
     if (sku) {
-      Api.get("/v1/inventory/skus/" + sku.id + "/available", { silent: true }).then(function (data) {
-        skuStock = data;
-        document.getElementById("f-stock").innerHTML = "<a href=\"inventory.html?skuId=" + sku.id + "\">" + data.available + "（去调整）</a>";
+      Api.get("/v1/admin/inventory?skuId=" + sku.id + "&page=1&size=1", { silent: true }).then(function (page) {
+        var row = (page.list || [])[0];
+        skuStock = row || null;
+        document.getElementById("f-stock").innerHTML = row
+          ? "<a href=\"inventory.html?skuId=" + sku.id + "\">" + row.available + "（去调整）</a>"
+          : "未建库存记录";
       }, function () {
         document.getElementById("f-stock").textContent = "—";
       });
@@ -223,7 +226,8 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
 
   Promise.all([
     Api.get("/v1/admin/categories"),
-    Api.get("/v1/brands", { silent: true }).then(function (list) { return list || []; }, function () { return []; }),
+    Api.get("/v1/admin/brands?page=1&size=100", { silent: true })
+      .then(function (page) { return page.list || []; }, function () { return []; }),
     Api.get("/v1/admin/params/templates", { silent: true }).then(function (list) { return list || []; }, function () { return []; }),
     editId ? Api.get("/v1/admin/products/" + editId) : Promise.resolve(null)
   ]).then(function (res) {

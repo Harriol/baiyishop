@@ -63,10 +63,11 @@ if (adminShell("dashboard", { title: "工作台", crumb: "今日概览" })) {
       + "</tbody></table></div></div>"
       + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"boxes\" data-size=\"16\"></i>库存预警</h3>"
       + "<a class=\"btn btn-sm\" href=\"inventory.html\">去补货<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></div>"
-      + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>SKU ID</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th></tr></thead><tbody>"
+      + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th></tr></thead><tbody>"
       + (alerts.length
           ? alerts.slice(0, 5).map(function (a) {
-              return "<tr><td>SKU " + a.skuId + "</td><td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.currentStock + "</td>"
+              return "<tr><td class=\"pname\" data-pid=\"" + (a.productId || "") + "\"><span class=\"small faint\">商品 " + (a.productId || "—") + "</span></td>"
+                + "<td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.currentStock + "</td>"
                 + "<td class=\"num\">" + a.threshold + "</td><td>" + formatTime(a.updatedAt) + "</td><td><span class=\"pill pill-pay\">待处理</span></td></tr>";
             }).join("")
           : "<tr><td colspan=\"5\"><div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"30\"></i><h4>暂无库存预警</h4></div></td></tr>")
@@ -75,6 +76,28 @@ if (adminShell("dashboard", { title: "工作台", crumb: "今日概览" })) {
       + "<div class=\"alert alert-plain mt12\"><i data-icon=\"zap\" data-size=\"15\"></i>当前进行中的秒杀场次："
       + (running.length ? esc(running.map(function (a) { return a.name; }).join("、")) : "无") + "</div>";
     mountIcons(content);
+    fillAlertNames(content);
+  });
+}
+
+/** 预警行只有商品 id，这里按行懒加载商品名（库存管理页同款做法，带缓存） */
+function fillAlertNames(scope) {
+  var cache = {};
+  scope.querySelectorAll(".pname").forEach(function (cell) {
+    var id = Number(cell.dataset.pid);
+    if (!id) { cell.textContent = "—"; return; }
+    var paint = function (p) {
+      if (!p) { cell.textContent = "商品 " + id; return; }
+      cell.innerHTML = "<div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.mainImage, "tee-01") + "\" alt=\"\">"
+        + "<span><a href=\"product-edit.html?id=" + p.id + "\">" + esc(p.name) + "</a><br>"
+        + "<span class=\"small faint\">" + esc(p.categoryName || "") + "</span></span></div>";
+      mountIcons(cell);
+    };
+    if (cache[id]) { paint(cache[id]); return; }
+    Api.get("/v1/admin/products/" + id, { silent: true }).then(function (p) {
+      cache[id] = p;
+      paint(p);
+    }, function () { paint(null); });
   });
 }
 </script>

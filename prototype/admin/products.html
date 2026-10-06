@@ -144,7 +144,8 @@ if (adminShell("products", { title: "商品管理", crumb: "商品", perm: "prod
 
   Promise.all([
     Api.get("/v1/admin/categories", { silent: true }).then(function (tree) { return flatten(tree, []); }, function () { return []; }),
-    Api.get("/v1/brands", { silent: true }).then(function (list) { return list || []; }, function () { return []; })
+    Api.get("/v1/admin/brands?page=1&size=100", { silent: true })
+      .then(function (page) { return page.list || []; }, function () { return []; })
   ]).then(function (res) {
     categoryOptions = res[0];
     brandOptions = res[1];

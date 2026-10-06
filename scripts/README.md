@@ -76,8 +76,8 @@ npm run dev            # http://localhost:5173
 
 | 入口 | 地址 | 说明 |
 | --- | --- | --- |
-| 用户端 Web | http://localhost:5173/index.html | 需自行注册账号（注册即登录） |
-| 运营后台 | http://localhost:5173/admin/login.html | `smokeadmin / Admin@2026`（超管）、`check_service / Admin@2026`（客服，仅查单 + 备注） |
+| 用户端 Web | http://localhost:5173/index.html | `buyer01 / Demo@2026`（也可自行注册，注册即登录） |
+| 运营后台 | http://localhost:5173/admin/login.html | 超管 `demo_admin`、运营 `demo_operator`、客服 `demo_service`，密码均 `Admin@2026` |
 | 小程序原型 | http://localhost:5173/miniapp/index.html | 点「我的 → 微信授权登录」走 `MockWechatAuthClient`，code 即 openid |
 
 要点：
@@ -86,4 +86,26 @@ npm run dev            # http://localhost:5173
 - 接口金额一律为「分」，展示换算在前端（`Store.money()`）；图片地址为 MinIO 示例地址时会回退到本地占位图。
 - 首页内容是后台「首页配置」里维护的：刚清过库时首页为空态，先在后台加轮播 / 金刚区 / 楼层。
 - 生产/同域部署时把 `window.BAIYI_API_BASE` 设为网关地址，或反代 `/api` 到网关即可（无需改代码）。
+
+## 演示数据（清库 + 播种）
+
+冒烟与压测会在库里留下大量测试数据（随机名分类 / 商品、1000 个压测用户、几十个测试管理员…）。
+要还原成一份可演示的数据，跑：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/reset-demo-data.ps1
+
+# 只播种不清库 / 服务没起时只做 SQL 部分
+powershell ... -File scripts/reset-demo-data.ps1 -SkipReset
+powershell ... -File scripts/reset-demo-data.ps1 -SkipHttp
+```
+
+| 步骤 | 内容 |
+| --- | --- |
+| 清理 | 清空 6 个业务库的分类 / 品牌 / 商品 / 库存（含秒杀池与流水）/ 订单 / 支付 / 秒杀活动 / 用户与地址 / 管理员；**保留** RBAC 字典（role / permission / role_permission） |
+| 播种（SQL） | 三级分类（8 + 21 + 28）、5 个品牌、4 个参数模板、42 个商品（各 1 个默认 SKU + 图集 + 参数值）、42 条库存（含 3 条低库存预警）、首页轮播 / 公告 / 金刚区 / 4 个楼层 |
+| 播种（接口） | 重建 ES 索引；注册演示买家并下 3 笔不同状态的订单（待付款 / 待发货 / 待收货，其中一笔走后台真实发货）；建 2 个秒杀场次（划拨库存由 seckill → inventory 服务端完成） |
+
+脚本是 `scripts/demo/DemoData.java`（单文件 Java，JDBC + HTTP，无额外依赖），可重复执行：每次都先清后建。
+运维三件套（冒烟、压测、演示数据）都在 `scripts/` 下，互不影响；跑完冒烟想让界面恢复干净，再跑一次本脚本即可。
 注意：压测器与被测服务在同一台机器时会互相抢资源，容量结论必须在环境分离后重测。

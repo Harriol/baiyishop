@@ -9,6 +9,7 @@ window.Api = (function () {
   var BASE = window.BAIYI_API_BASE || "/api";
   /* 前台与后台分开存会话：同一个浏览器同时登录前台用户与后台管理员时互不覆盖 */
   var NS = /\/admin\//.test(window.location.pathname) ? "baiyi.admin" : "baiyi";
+  var ADMIN_PAGE = NS === "baiyi.admin";
   var TOKEN_KEY = NS + ".token";
   var REFRESH_KEY = NS + ".refresh";
   var USER_KEY = NS + ".user";
@@ -68,7 +69,11 @@ window.Api = (function () {
     opts = opts || {};
     var headers = {};
     if (body !== undefined && body !== null) headers["Content-Type"] = "application/json";
-    if (token()) headers.Authorization = "Bearer " + token();
+    // 后台令牌只发给 /v1/admin/**：公开接口若收到后台令牌会被服务端判为 10002（受众不匹配），
+    // 既拿不到数据，还会被误判成「登录已失效」而清掉会话
+    if (token() && !(ADMIN_PAGE && !/^\/v1\/admin\//.test(path))) {
+      headers.Authorization = "Bearer " + token();
+    }
     if (opts.requestId) headers["X-Request-Id"] = opts.requestId;
 
     return fetch(BASE + path, {
@@ -93,9 +98,10 @@ window.Api = (function () {
         }
         var error = new Error(payload.message || "操作失败，请稍后重试");
         error.code = payload.code;
-        if (payload.code === 10002 && !opts.silent) {
+        if (payload.code === 10002) {
+          // 令牌失效必须清会话；silent 只用来抑制跳转（例如首页静默刷新登录态）
           clearSession();
-          if (!/login\.html$/.test(location.pathname)) {
+          if (!opts.silent && !/login\.html$/.test(location.pathname)) {
             location.href = loginUrl();
           }
         }
@@ -163,8 +169,8 @@ window.Api = (function () {
       return post("/v1/auth/logout", { refreshToken: refreshToken }, { silent: true })
         .then(done, done);
     },
-    profile: function () {
-      return get("/v1/users/me").then(function (profile) {
+    profile: function (opts) {
+      return get("/v1/users/me", opts).then(function (profile) {
         saveUser(profile);
         return profile;
       });
