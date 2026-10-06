@@ -195,6 +195,15 @@ public class DemoData {
             resetAll();
         } else {
             System.out.println("\n[1/6] 跳过清理（-SkipReset）");
+            long existing;
+            try (Connection c = db("baiyishop_product")) {
+                existing = count(c, "product");
+            }
+            if (existing > 0) {
+                throw new IllegalStateException("baiyishop_product.product 已有 " + existing
+                        + " 条数据：-SkipReset 只适合在空库上播种（品牌/模板名有唯一约束，重复播种会报错）。"
+                        + "要清库重来请去掉该参数。");
+            }
         }
 
         System.out.println("\n[2/6] 写入分类 / 品牌 / 参数模板 / 商品 / 库存 / 首页配置…");
