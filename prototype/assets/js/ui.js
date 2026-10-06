@@ -2,7 +2,8 @@
 
 /* ---------- 顶栏 ---------- */
 window.renderHeader = function (active) {
-  var cartCount = window.DB.cart.reduce(function (sum, c) { return sum + (c.invalid ? 0 : c.quantity); }, 0);
+  var cartCount = window.Store.cartCount();
+  var profile = window.Store.user();
   var kw = window.qs("keyword", "");
   var links = [
     { key: "home", text: "首页", href: "index.html" },
@@ -26,17 +27,33 @@ window.renderHeader = function (active) {
     + (cartCount > 0 ? '<b class="cart-badge">' + cartCount + '</b>' : "") + '</a>'
     + '<div class="user-menu" id="userMenu">'
     + '<button type="button" class="user-trigger" aria-haspopup="true" aria-expanded="false">'
-    + '<i data-icon="user" data-size="18"></i><span>' + window.DB.user.nickname + '</span>'
+    + '<i data-icon="user" data-size="18"></i><span>'
+    + (profile ? (profile.nickname || profile.username || "我的账号") : "登录 / 注册") + '</span>'
     + '<i data-icon="chevron-down" data-size="14"></i></button>'
     + '<div class="user-drop" role="menu">'
     + '<a role="menuitem" href="profile.html"><i data-icon="user" data-size="16"></i>个人中心</a>'
-    + '<a role="menuitem" href="login.html"><i data-icon="log-out" data-size="16"></i>退出登录</a>'
+    + '<a role="menuitem" href="orders.html"><i data-icon="package" data-size="16"></i>我的订单</a>'
+    + (profile
+        ? '<a role="menuitem" href="#" id="logoutLink"><i data-icon="log-out" data-size="16"></i>退出登录</a>'
+        : '<a role="menuitem" href="login.html"><i data-icon="log-in" data-size="16"></i>去登录</a>')
     + '</div></div>'
     + '</div></div>';
   var bar = document.createElement("header");
   bar.className = "topbar";
   bar.innerHTML = html;
   document.body.insertBefore(bar, document.body.firstChild);
+  window.mountIcons(bar);
+
+  var logout = bar.querySelector("#logoutLink");
+  if (logout) {
+    logout.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      window.Api.logout().then(function () {
+        window.toast("已退出登录");
+        setTimeout(function () { location.href = "index.html"; }, 600);
+      });
+    });
+  }
 
   /* 触屏 / 键盘场景：点击也能展开下拉 */
   var menu = bar.querySelector("#userMenu");
@@ -64,37 +81,19 @@ window.renderHeader = function (active) {
 
 /* ---------- 分类树工具（三级） ---------- */
 window.catById = function (id) {
-  return window.DB.categories.filter(function (c) { return c.id === Number(id); })[0] || null;
+  return window.Store.catById(id);
 };
 /* 一级分类 → 其下二级（含三级）构建成树，供首页左侧导航使用 */
 window.catTree = function () {
-  var all = window.DB.categories;
-  return all.filter(function (c) { return c.level === 1; }).map(function (l1) {
-    var level2 = all.filter(function (c) { return c.parentId === l1.id; }).map(function (l2) {
-      return {
-        id: l2.id, name: l2.name,
-        children: all.filter(function (c) { return c.parentId === l2.id; })
-      };
-    });
-    return { id: l1.id, name: l1.name, children: level2 };
-  });
+  return window.Store.catTree();
 };
 /* 自身 + 全部后代的分类 id，用于「含子分类」查询 */
 window.catIds = function (id) {
-  var cat = window.catById(id);
-  if (!cat) return [Number(id)];
-  return window.DB.categories
-    .filter(function (c) { return c.path.indexOf(cat.path) === 0; })
-    .map(function (c) { return c.id; });
+  return window.Store.catIdsOf(id);
 };
 /* 从子分类回溯到一级分类的路径 */
 window.catPath = function (id) {
-  var chain = [], cur = window.catById(id), guard = 0;
-  while (cur && guard++ < 5) {
-    chain.unshift(cur);
-    cur = cur.parentId ? window.catById(cur.parentId) : null;
-  }
-  return chain;
+  return window.Store.catPath(id);
 };
 
 /* ---------- 页脚 ---------- */
@@ -106,25 +105,10 @@ window.renderFooter = function () {
   document.body.appendChild(f);
 };
 
-/* ---------- 分类聚合：含子分类的商品 ---------- */
-window.categoryProducts = function (categoryId, sortField) {
-  var cat = window.C(categoryId);
-  var ids = [Number(categoryId)];
-  if (cat) {
-    window.DB.categories.forEach(function (c) {
-      if (c.path.indexOf(cat.path) === 0 && c.id !== cat.id) ids.push(c.id);
-    });
-  }
-  var list = window.DB.products.filter(function (p) {
-    return p.status === "ON_SALE" && ids.indexOf(p.categoryId) >= 0;
-  });
-  var sorters = {
-    sales: function (a, b) { return b.sales - a.sales; },
-    "new": function (a, b) { return a.onSaleDays - b.onSaleDays; },
-    price_asc: function (a, b) { return Number(a.price) - Number(b.price); },
-    price_desc: function (a, b) { return Number(b.price) - Number(a.price); }
-  };
-  return list.sort(sorters[sortField] || sorters.sales);
+/* ---------- 分类聚合：含子分类的商品（走后端接口，返回 Promise） ---------- */
+window.categoryProducts = function (categoryId, sortField, page, size) {
+  return window.Api.get("/v1/categories/" + categoryId + "/products?sort=" + (sortField || "sales")
+    + "&page=" + (page || 1) + "&size=" + (size || 20));
 };
 
 window.sortLabel = function (f) {
@@ -133,17 +117,15 @@ window.sortLabel = function (f) {
 
 /* ---------- 商品卡 ---------- */
 window.productCard = function (p) {
-  var soldOut = p.stock <= 0;
-  var tags = (p.tags || []).slice(0, 1).map(function (t) {
-    return '<span class="tag ' + (t === "售罄" || t === "库存紧张" ? "tag-warn" : (t === "爆款" || t === "热销" ? "tag-price" : "tag-brand")) + '">' + t + '</span>';
-  }).join("");
+  var image = window.img(p.mainImage || p.image || "", "headphone-01");
+  var tag = p.brandName ? '<span class="tag tag-brand">' + window.esc(p.brandName) + '</span>' : "";
   return '<a class="product-card" href="product.html?id=' + p.id + '">'
-    + '<div class="product-thumb"><img src="' + window.img(p.image) + '" alt="' + p.name + '" loading="lazy">'
-    + '<span class="corner">' + (soldOut ? '<span class="tag tag-out">已售罄</span>' : tags) + '</span></div>'
+    + '<div class="product-thumb"><img src="' + image + '" alt="' + window.esc(p.name) + '" loading="lazy">'
+    + '<span class="corner">' + tag + '</span></div>'
     + '<div class="product-info">'
-    + '<h4 class="product-name clamp2">' + p.name + '</h4>'
-    + '<div class="product-meta"><span class="price">' + window.yuan(p.price) + '</span>'
-    + '<span class="small faint">已售 ' + p.sales + '</span></div>'
+    + '<h4 class="product-name clamp2">' + window.esc(p.name) + '</h4>'
+    + '<div class="product-meta"><span class="price">' + window.Store.moneyHtml(p.price) + '</span>'
+    + '<span class="small faint">已售 ' + (p.sales || 0) + '</span></div>'
     + '</div></a>';
 };
 
@@ -165,7 +147,7 @@ window.emptyHTML = function (title, desc) {
 
 /* ---------- 状态 ---------- */
 window.statusPill = function (status) {
-  return '<span class="pill ' + window.DB.statusPill[status] + '">' + window.DB.statusText[status] + '</span>';
+  return window.Store.statusPill(status);
 };
 
 /* ---------- 轻提示 ---------- */
@@ -253,24 +235,23 @@ window.stepbar = function (step) {
   }).join("") + '</div>';
 };
 
-/* ---------- 单号生成（样式对齐 docs/api.md 6.2：时间戳 + 随机位） ---------- */
-window.genOrderNo = function () {
-  function p(n) { return (n < 10 ? "0" : "") + n; }
-  var d = new Date();
-  var stamp = "" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
-  var rnd = String(Math.floor(Math.random() * 100000000));
-  while (rnd.length < 8) rnd = "0" + rnd;
-  return stamp + rnd;
-};
-window.genTicketId = function () {
-  var rnd = String(Math.floor(Math.random() * 10000));
-  while (rnd.length < 4) rnd = "0" + rnd;
-  return "TK" + window.genOrderNo().slice(0, 14) + rnd;
-};
-
 /* ---------- 通用初始化 ---------- */
-window.pageInit = function (active) {
+function paintHeader(active) {
+  var old = document.querySelector("header.topbar");
+  if (old) old.remove();
   window.renderHeader(active);
+  window.mountIcons(document);
+}
+
+/** 供页面在登录态 / 购物车数量变化后重画顶栏 */
+window.repaintHeader = paintHeader;
+
+window.pageInit = function (active) {
+  paintHeader(active);
   window.renderFooter();
   window.mountIcons(document);
+  // 会话与购物车角标是异步的：拿到后让顶栏按最新状态重画一次
+  Promise.all([window.Store.refreshUser(), window.Store.refreshCartCount()]).then(function () {
+    paintHeader(active);
+  });
 };

@@ -31,35 +31,38 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
-var curCat = Number(qs("id", 12)), curSort = "sales", curPage = 1, PAGE = 8;
+
+var curCat = Number(qs("id", 0));
+var curSort = qs("sort", "sales");
+var curPage = 1;
+var PAGE = 8;
+var total = 0;
 var expanded = {};
-(function () { catPath(curCat).forEach(function (c) { expanded[c.id] = true; }); })();
+
+document.querySelectorAll("#sortSeg button").forEach(function (b) {
+  if (b.dataset.value === curSort) {
+    document.querySelectorAll("#sortSeg button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+  }
+});
+bindTabs("#sortSeg", function (value) { curSort = value; curPage = 1; renderList(); });
 
 function renderTree() {
   var box = document.getElementById("tree");
   var html = "<div class=\"cat-tree\">";
   catTree().forEach(function (l1) {
-    var cnt1 = categoryProducts(l1.id, "sales").length;
-    var hasKids = l1.children.length > 0;
-    html += "<button class=\"cat-node l1 " + (curCat === l1.id ? "on" : "") + "\" data-cat=\"" + l1.id + "\" data-lv=\"1\">"
-      + "<span class=\"cat-caret " + (expanded[l1.id] ? "exp" : "") + "\" data-toggle=\"" + l1.id + "\">" + (hasKids ? "›" : "") + "</span>"
-      + l1.name + "<span class=\"count\">" + cnt1 + "</span></button>";
-    if (hasKids && expanded[l1.id]) {
+    html += nodeHTML(l1, 1);
+    if (expanded[l1.id]) {
       l1.children.forEach(function (l2) {
-        var cnt2 = categoryProducts(l2.id, "sales").length;
-        html += "<button class=\"cat-node l2 " + (curCat === l2.id ? "on" : "") + "\" data-cat=\"" + l2.id + "\" data-lv=\"2\">"
-          + "<span class=\"cat-caret " + (expanded[l2.id] ? "exp" : "") + "\" data-toggle=\"" + l2.id + "\">" + (l2.children.length ? "›" : "") + "</span>"
-          + l2.name + "<span class=\"count\">" + cnt2 + "</span></button>";
+        html += nodeHTML(l2, 2);
         if (expanded[l2.id]) {
-          l2.children.forEach(function (l3) {
-            html += "<button class=\"cat-node l3 " + (curCat === l3.id ? "on" : "") + "\" data-cat=\"" + l3.id + "\" data-lv=\"3\">"
-              + "<span class=\"cat-caret\"></span>" + l3.name
-              + "<span class=\"count\">" + categoryProducts(l3.id, "sales").length + "</span></button>";
-          });
+          (l2.children || []).forEach(function (l3) { html += nodeHTML(l3, 3); });
         }
       });
     }
@@ -72,9 +75,9 @@ function renderTree() {
       if (ev.target.dataset.toggle) return;   // 点箭头只展开，不筛选
       curCat = Number(b.dataset.cat);
       curPage = 1;
-      var lv = Number(b.dataset.lv);
-      if (lv < 3) expanded[curCat] = true;
-      renderTree(); renderList();
+      if (Number(b.dataset.lv) < 3) expanded[curCat] = true;
+      renderTree();
+      renderList();
     });
   });
   box.querySelectorAll("[data-toggle]").forEach(function (t) {
@@ -87,19 +90,30 @@ function renderTree() {
   });
 }
 
-function renderList() {
-  var all = categoryProducts(curCat, curSort);
-  var cat = C(curCat);
-  document.getElementById("crumbCat").innerHTML = cat
-    ? catPath(curCat).map(function (c) { return "<a href=\"category.html?id=" + c.id + "\">" + c.name + "</a>"; }).join(" <span class=\"faint\">/</span> ")
-    : "全部分类";
-  document.getElementById("count").textContent = "共 " + all.length + " 件商品 · 按" + sortLabel(curSort) + "排序";
-  var slice = all.slice((curPage - 1) * PAGE, curPage * PAGE);
-  mountGrid("#grid", slice);
-  renderPager(all.length);
+function nodeHTML(cat, level) {
+  var hasKids = level < 3 && (cat.children || []).length > 0;
+  var count = cat.id === curCat && total ? "<span class=\"count\">" + total + "</span>" : "";
+  return "<button class=\"cat-node l" + level + " " + (curCat === cat.id ? "on" : "") + "\" data-cat=\"" + cat.id + "\" data-lv=\"" + level + "\">"
+    + "<span class=\"cat-caret " + (expanded[cat.id] ? "exp" : "") + "\" data-toggle=\"" + cat.id + "\">" + (hasKids ? "›" : "") + "</span>"
+    + esc(cat.name) + count + "</button>";
 }
 
-function renderPager(total) {
+function renderList() {
+  if (!curCat) return;
+  var chain = catPath(curCat);
+  document.getElementById("crumbCat").innerHTML = chain.length
+    ? chain.map(function (c) { return "<a href=\"category.html?id=" + c.id + "\">" + esc(c.name) + "</a>"; }).join(" <span class=\"faint\">/</span> ")
+    : "全部分类";
+  return categoryProducts(curCat, curSort, curPage, PAGE).then(function (page) {
+    total = page.total || 0;
+    document.getElementById("count").textContent = "共 " + total + " 件商品 · 按" + sortLabel(curSort) + "排序";
+    mountGrid("#grid", page.list || []);
+    renderPager();
+    renderTree();
+  }, showError);
+}
+
+function renderPager() {
   var pages = Math.max(1, Math.ceil(total / PAGE));
   var el = document.getElementById("pager");
   if (pages <= 1) { el.innerHTML = ""; return; }
@@ -112,8 +126,21 @@ function renderPager(total) {
   });
 }
 
-bindTabs("#sortSeg", function (v) { curSort = v; curPage = 1; renderList(); });
-renderTree(); renderList();
+function boot() {
+  Store.categories().then(function () {
+    if (!curCat) {
+      var first = catTree()[0];
+      curCat = first ? first.id : 0;
+    }
+    catPath(curCat).forEach(function (c) { expanded[c.id] = true; });
+    renderTree();
+    renderList();
+    document.getElementById("grid").innerHTML = "<div class=\"empty\" style=\"grid-column:1/-1\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载商品…</h4></div>";
+    mountIcons(document.getElementById("grid"));
+  }, showError);
+}
+
+boot();
 </script>
 </body>
 </html>

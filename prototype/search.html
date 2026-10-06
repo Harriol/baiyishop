@@ -32,28 +32,39 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/util.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
-var kw = qs("keyword", ""), fCat = 0, fBrand = 0, fPrice = "", sort = "composite", page = 1, PAGE = 8;
+var kw = qs("keyword", ""), fCat = Number(qs("categoryId", 0)), fBrand = 0, fPrice = "", sort = "composite", page = 1, PAGE = 8;
+var brands = [];
 
-var priceRanges = [{ k: "", t: "不限" }, { k: "0-100", t: "100 元以下" }, { k: "100-300", t: "100-300 元" }, { k: "300-1000", t: "300-1000 元" }, { k: "1000-", t: "1000 元以上" }];
+/* 价格区间按「分」传递（后端金额单位） */
+var priceRanges = [
+  { k: "", t: "不限" }, { k: "0-10000", t: "100 元以下" },
+  { k: "10000-30000", t: "100-300 元" }, { k: "30000-100000", t: "300-1000 元" },
+  { k: "100000-", t: "1000 元以上" }
+];
 
 function renderFilters() {
   var l1s = catTree();
   var curL1 = null;
-  if (fCat) { var chain = catPath(fCat); curL1 = chain[0].id; }
-  var l2s = curL1 ? catTree().filter(function (x) { return x.id === curL1; })[0].children : [];
-  var brandChips = DB.brands.map(function (b) { return "<button data-brand=\"" + b.id + "\" class=\"" + (fBrand === b.id ? "on" : "") + "\">" + b.name + "</button>"; }).join("");
-  document.getElementById("filters").innerHTML =
+  if (fCat) { var chain = catPath(fCat); curL1 = chain.length ? chain[0].id : null; }
+  var l2s = curL1 ? (catTree().filter(function (x) { return x.id === curL1; })[0] || {}).children || [] : [];
+  var brandChips = brands.map(function (b) {
+    return "<button data-brand=\"" + b.id + "\" class=\"" + (fBrand === b.id ? "on" : "") + "\">" + esc(b.name) + "</button>";
+  }).join("");
+  var box = document.getElementById("filters");
+  box.innerHTML =
     "<div class=\"filter-group\"><h4>一级分类</h4><div class=\"filter-opts\">"
       + "<button data-cat=\"0\" class=\"" + (fCat === 0 ? "on" : "") + "\">不限</button>"
-      + l1s.map(function (c) { return "<button data-cat=\"" + c.id + "\" class=\"" + (curL1 === c.id && fCat === c.id ? "on" : "") + "\">" + c.name + "</button>"; }).join("")
+      + l1s.map(function (c) { return "<button data-cat=\"" + c.id + "\" class=\"" + (curL1 === c.id ? "on" : "") + "\">" + esc(c.name) + "</button>"; }).join("")
     + "</div></div>"
     + (l2s.length
         ? "<div class=\"filter-group\"><h4>二级分类</h4><div class=\"filter-opts\">"
-          + l2s.map(function (c) { return "<button data-cat=\"" + c.id + "\" class=\"" + (fCat === c.id ? "on" : "") + "\">" + c.name + "</button>"; }).join("")
+          + l2s.map(function (c) { return "<button data-cat=\"" + c.id + "\" class=\"" + (fCat === c.id ? "on" : "") + "\">" + esc(c.name) + "</button>"; }).join("")
           + "</div></div>"
         : "")
     + "<div class=\"filter-group\"><h4>品牌</h4><div class=\"filter-opts\">"
@@ -62,53 +73,41 @@ function renderFilters() {
     + "<div class=\"filter-group\"><h4>价格区间</h4><div class=\"filter-opts\">"
       + priceRanges.map(function (r) { return "<button data-price=\"" + r.k + "\" class=\"" + (fPrice === r.k ? "on" : "") + "\">" + r.t + "</button>"; }).join("")
     + "</div></div>";
-  var box = document.getElementById("filters");
   box.querySelectorAll("[data-cat]").forEach(function (b) { b.onclick = function () { fCat = Number(b.dataset.cat); page = 1; render(); }; });
   box.querySelectorAll("[data-brand]").forEach(function (b) { b.onclick = function () { fBrand = Number(b.dataset.brand); page = 1; render(); }; });
   box.querySelectorAll("[data-price]").forEach(function (b) { b.onclick = function () { fPrice = b.dataset.price; page = 1; render(); }; });
   mountIcons(box);
 }
 
-/* 综合排序：销量得分 x 0.6 + 上架新鲜度 x 0.4（见 docs/requirements.md 第 8 章） */
-function compositeScore(p) {
-  var maxLog = Math.log(1 + Math.max.apply(null, DB.products.map(function (x) { return x.sales; })));
-  var salesScore = Math.log(1 + p.sales) / maxLog;
-  var fresh = Math.max(0, 1 - p.onSaleDays / 30);
-  return salesScore * 0.6 + fresh * 0.4;
-}
-
-function match() {
-  return DB.products.filter(function (p) {
-    if (p.status !== "ON_SALE") return false;
-    if (kw && p.name.toLowerCase().indexOf(kw.toLowerCase()) < 0) return false;
-    if (fCat && catIds(fCat).indexOf(p.categoryId) < 0) return false;
-    if (fBrand && p.brandId !== fBrand) return false;
-    if (fPrice) {
-      var seg = fPrice.split("-"), lo = Number(seg[0]), hi = seg[1] === "" ? Infinity : Number(seg[1]);
-      var pr = Number(p.price);
-      if (pr < lo || pr > hi) return false;
-    }
-    return true;
-  });
+/** 组装查询串（金额已是分；排序与分页交给后端，综合排序由后端打分） */
+function queryString() {
+  var parts = ["size=" + PAGE, "page=" + page, "sort=" + sort];
+  if (kw) parts.push("keyword=" + encodeURIComponent(kw));
+  if (fCat) parts.push("categoryId=" + fCat);
+  if (fBrand) parts.push("brandId=" + fBrand);
+  if (fPrice) {
+    var seg = fPrice.split("-");
+    if (seg[0]) parts.push("minPrice=" + seg[0]);
+    if (seg[1]) parts.push("maxPrice=" + seg[1]);
+  }
+  return parts.join("&");
 }
 
 function render() {
   renderFilters();
-  var list = match();
-  if (sort === "composite") list.sort(function (a, b) { return compositeScore(b) - compositeScore(a); });
-  else if (sort === "sales") list.sort(function (a, b) { return b.sales - a.sales; });
-  else if (sort === "price_asc") list.sort(function (a, b) { return Number(a.price) - Number(b.price); });
-  else list.sort(function (a, b) { return Number(b.price) - Number(a.price); });
-
-  var bar = document.getElementById("keywordBar");
-  if (kw) {
-    bar.style.display = "flex";
-    bar.innerHTML = "<i data-icon=\"search\" data-size=\"15\"></i><span>关键词「" + kw + "」共找到 <b>" + list.length + "</b> 件商品</span>";
-  } else { bar.style.display = "none"; }
-  document.getElementById("count").textContent = "共 " + list.length + " 件商品";
-  mountGrid("#grid", list.slice((page - 1) * PAGE, page * PAGE));
-  renderPager(list.length);
-  mountIcons(document);
+  return Api.get("/v1/search/products?" + queryString()).then(function (data) {
+    var list = (data && data.list) || [];
+    var total = (data && data.total) || 0;
+    var bar = document.getElementById("keywordBar");
+    if (kw) {
+      bar.style.display = "flex";
+      bar.innerHTML = "<i data-icon=\"search\" data-size=\"15\"></i><span>关键词「" + esc(kw) + "」共找到 <b>" + total + "</b> 件商品</span>";
+    } else { bar.style.display = "none"; }
+    document.getElementById("count").textContent = "共 " + total + " 件商品";
+    mountGrid("#grid", list);
+    renderPager(total);
+    mountIcons(document);
+  }).catch(showError);
 }
 
 function renderPager(total) {
@@ -122,7 +121,11 @@ function renderPager(total) {
 
 bindTabs("#sortSeg", function (v) { sort = v; page = 1; render(); });
 document.getElementById("reset").onclick = function () { fCat = 0; fBrand = 0; fPrice = ""; page = 1; render(); toast("已重置筛选条件"); };
-render();
+
+Promise.all([Store.categories(), Api.get("/v1/brands").catch(function () { return []; })]).then(function (res) {
+  brands = res[1] || [];
+  render();
+}).catch(showError);
 </script>
 </body>
 </html>

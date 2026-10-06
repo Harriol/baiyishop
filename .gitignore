@@ -48,3 +48,7 @@ application-local.yaml
 
 ### 压测运行时产物（JMeter 会在工作目录留下日志；JTL 与 HTML 报告落在 docs/load-test，本地保留）###
 jmeter.log
+
+### 前端联调（Vite 依赖与构建产物）###
+node_modules/
+prototype/dist/

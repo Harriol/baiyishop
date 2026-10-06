@@ -10,43 +10,70 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/mini-shell.js"></script>
 <script>
 var body = miniShell({ tab: "home", title: "百益商城" });
-var running = DB.seckill.sessions.filter(function (s) { return s.status === "RUNNING"; })[0] || DB.seckill.sessions[0];
-var flash = DB.seckill.items.filter(function (i) { return i.sessionId === running.id; }).slice(0, 3);
-var banners = DB.home.banners;
+body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"loader-circle\" data-size=\"30\"></i><h4>正在加载…</h4></div>";
+
 function card(p) {
-  return "<a class=\"m-card\" href=\"product.html?id=" + p.id + "\"><div class=\"ph\"><img src=\"" + img(p.image) + "\" alt=\"\"></div>"
-    + "<div class=\"in\"><div class=\"nm\">" + p.name + "</div><div class=\"pr\">" + yuanPlain(p.price) + "</div></div></a>";
+  return "<a class=\"m-card\" href=\"product.html?id=" + p.id + "\"><div class=\"ph\"><img src=\"" + img(p.mainImage, "headphone-01") + "\" alt=\"\"></div>"
+    + "<div class=\"in\"><div class=\"nm\">" + esc(p.name) + "</div><div class=\"pr\">" + yuanPlain(p.price) + "</div></div></a>";
 }
-body.innerHTML =
-  "<div class=\"m-search\"><a class=\"box\" href=\"category.html\"><i data-icon=\"search\" data-size=\"15\"></i>搜索商品，如「耳机」</a></div>"
-  + "<div class=\"m-banner\"><img src=\"" + img(banners[0].image) + "\" alt=\"\"><div class=\"cap\">" + banners[0].title + " · " + banners[0].subtitle + "</div></div>"
-  + "<div class=\"m-nav\">" + DB.home.navs.slice(0, 10).map(function (n) {
-      var href = n.href ? n.href : ("category.html?id=" + n.categoryId);
-      return "<a href=\"" + href + "\"><span class=\"ic\"><i data-icon=\"" + n.icon + "\" data-size=\"18\"></i></span>" + n.name + "</a>";
-    }).join("") + "</div>"
-  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3><i data-icon=\"zap\" data-size=\"16\" style=\"color:var(--price)\"></i>限时秒杀</h3>"
-    + "<a class=\"small\" style=\"color:var(--brand)\" href=\"../seckill.html\">更多 ></a></div>"
-    + "<div class=\"m-list\">" + flash.map(function (it) {
-        var p = P(it.productId);
-        return "<div class=\"m-row\"><img class=\"pic\" src=\"" + img(p.image) + "\" alt=\"\">"
-          + "<div class=\"grow\"><div class=\"nm clamp2\" style=\"font-size:12.5px\">" + p.name + "</div>"
-          + "<div class=\"row g6 mt8\"><span style=\"color:var(--price);font-weight:700\">" + yuanPlain(it.seckillPrice) + "</span>"
-          + "<span class=\"price-origin small\">" + yuanPlain(it.originPrice) + "</span></div>"
-          + "<div class=\"progress mt8\"><i style=\"width:" + Math.round(it.sold / it.total * 100) + "%\"></i></div></div>"
-          + "<a class=\"m-btn price\" style=\"height:30px;padding:0 12px;font-size:12px\" href=\"../seckill.html\">去抢</a></div>";
-      }).join("") + "</div></div>"
-  + DB.home.floors.slice(0, 3).map(function (f) {
-      var list = categoryProducts(f.categoryId, f.sortField).slice(0, 4);
-      return "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>" + f.title + "</h3>"
-        + "<a class=\"small\" style=\"color:var(--brand)\" href=\"category.html?id=" + f.categoryId + "\">更多 ></a></div>"
-        + "<div class=\"m-grid\">" + list.map(card).join("") + "</div></div>";
-    }).join("") + "<div style=\"height:12px\"></div>";
-mountMiniIcons(document);
+
+Promise.all([
+  Api.get("/v1/home"),
+  Store.categories(),
+  Api.get("/v1/seckill/activities?limit=5").catch(function () { return []; })
+]).then(function (res) {
+  var home = res[0] || {};
+  var sessions = res[2] || [];
+  var banners = home.banners || [];
+  var navs = home.navs || [];
+  var floors = home.floors || [];
+  var running = sessions.filter(function (s) { return s.status === "RUNNING"; })[0] || sessions[0];
+
+  body.innerHTML =
+    "<div class=\"m-search\"><a class=\"box\" href=\"category.html\"><i data-icon=\"search\" data-size=\"15\"></i>搜索商品，如「耳机」</a></div>"
+    + (banners.length
+        ? "<div class=\"m-banner\"><img src=\"" + img(banners[0].imageUrl, "banner-01") + "\" alt=\"\"><div class=\"cap\">" + esc(banners[0].title || "百益商城") + "</div></div>"
+        : "")
+    + (navs.length
+        ? "<div class=\"m-nav\">" + navs.slice(0, 10).map(function (n) {
+            var href = n.categoryId ? ("category.html?id=" + n.categoryId) : "category.html";
+            return "<a href=\"" + href + "\"><span class=\"ic\"><i data-icon=\"" + (n.icon && n.icon.length <= 20 && !/[:/]/.test(n.icon) ? n.icon : "layout-grid") + "\" data-size=\"18\"></i></span>" + esc(n.name) + "</a>";
+          }).join("") + "</div>"
+        : "")
+    + (running && (running.skus || []).length
+        ? "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3><i data-icon=\"zap\" data-size=\"16\" style=\"color:var(--price)\"></i>限时秒杀</h3>"
+          + "<a class=\"small\" style=\"color:var(--brand)\" href=\"../seckill.html\">更多 ></a></div>"
+          + "<div class=\"m-list\">" + running.skus.slice(0, 3).map(function (sku) {
+              var sold = Math.max(0, (sku.allocStock || 0) - (sku.remaining || 0));
+              var pct = sku.allocStock ? Math.round(sold / sku.allocStock * 100) : 0;
+              return "<div class=\"m-row\"><img class=\"pic\" src=\"" + img(sku.image, "headphone-01") + "\" alt=\"\">"
+                + "<div class=\"grow\"><div class=\"nm clamp2\" style=\"font-size:12.5px\">" + esc(sku.productName) + "</div>"
+                + "<div class=\"row g6 mt8\"><span style=\"color:var(--price);font-weight:700\">" + yuanPlain(sku.seckillPrice) + "</span>"
+                + "<span class=\"price-origin small\">" + yuanPlain(sku.originalPrice) + "</span></div>"
+                + "<div class=\"progress mt8\"><i style=\"width:" + pct + "%\"></i></div></div>"
+                + "<a class=\"m-btn price\" style=\"height:30px;padding:0 12px;font-size:12px\" href=\"../seckill.html\">去抢</a></div>";
+            }).join("") + "</div></div>"
+        : "")
+    + (floors.length
+        ? floors.slice(0, 3).map(function (f) {
+            return "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>" + esc(f.title) + "</h3>"
+              + "<a class=\"small\" style=\"color:var(--brand)\" href=\"category.html?id=" + f.categoryId + "\">更多 ></a></div>"
+              + "<div class=\"m-grid\">" + ((f.products || []).slice(0, 4).map(card).join("") || "<span class=\"small faint\">该楼层暂无商品</span>") + "</div></div>";
+          }).join("")
+        : "<div class=\"empty\" style=\"padding:30px 0\"><i data-icon=\"layout-grid\" data-size=\"32\"></i><h4>首页还没配置内容</h4><p class=\"small\">可在运营后台「首页配置」里添加轮播 / 金刚区 / 楼层</p></div>")
+    + "<div style=\"height:12px\"></div>";
+  mountMiniIcons(body);
+}, function (error) {
+  body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"circle-alert\" data-size=\"34\"></i><h4>加载失败</h4><p class=\"small\">" + esc(error.message) + "</p></div>";
+  mountMiniIcons(body);
+});
 </script>
 </body>
 </html>

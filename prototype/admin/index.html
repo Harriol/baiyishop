@@ -10,51 +10,72 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
 if (adminShell("dashboard", { title: "工作台", crumb: "今日概览" })) {
-  var AO = ADMIN_DB.orders, AI = ADMIN_DB.inventory;
-  var pendingShip = AO.filter(function (o) { return o.status === "PENDING_SHIPMENT"; });
-  var pendingPay = AO.filter(function (o) { return o.status === "PENDING_PAYMENT"; });
-  var alerts = ADMIN_DB.alerts.filter(function (a) { return a.status === "OPEN"; });
-  var onSale = DB.products.filter(function (p) { return p.status === "ON_SALE"; });
-  var runningSeckill = DB.seckill.sessions.filter(function (s) { return s.status === "RUNNING"; });
-  var stats = [
-    { k: "待发货订单", v: pendingShip.length, d: "需要尽快处理", icon: "package", href: "orders.html" },
-    { k: "待付款订单", v: pendingPay.length, d: "15 分钟未付自动取消", icon: "clock", href: "orders.html" },
-    { k: "库存预警", v: alerts.length, d: "低于阈值需补货", icon: "boxes", href: "inventory.html" },
-    { k: "在售商品", v: onSale.length, d: "共 " + DB.products.length + " 个商品", icon: "layout-grid", href: "products.html" }
-  ];
-  document.getElementById("content").innerHTML =
-    "<div class=\"stat-grid\">" + stats.map(function (s) {
-      return "<a class=\"stat\" href=\"" + s.href + "\"><div class=\"k\"><i data-icon=\"" + s.icon + "\" data-size=\"14\"></i>" + s.k + "</div>"
-        + "<div class=\"v\">" + s.v + "</div><div class=\"d\">" + s.d + "</div></a>";
-    }).join("") + "</div>"
-    + "<div class=\"panel mt12\"><div class=\"panel-head\"><h3><i data-icon=\"package\" data-size=\"16\"></i>待发货订单</h3>"
-    + "<a class=\"btn btn-sm\" href=\"orders.html\">全部订单<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></div>"
-    + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>订单号</th><th>买家</th><th>商品</th><th class=\"num\">实付</th><th>支付时间</th><th>操作</th></tr></thead><tbody>"
-    + pendingShip.map(function (o) {
-        var first = P(o.items[0].productId);
-        return "<tr><td>" + o.orderNo + "</td><td>" + o.buyer + "</td>"
-          + "<td>" + first.name + (o.items.length > 1 ? " 等 " + o.items.length + " 件" : "") + "</td>"
-          + "<td class=\"num price\">" + yuanPlain(o.payAmount) + "</td><td>" + (o.payTime || "—") + "</td>"
-          + "<td><div class=\"table-actions\"><button class=\"btn btn-sm\" data-ship=\"" + o.orderNo + "\">发货</button>"
-          + "<button class=\"btn btn-sm\" data-note=\"" + o.orderNo + "\">备注</button></div></td></tr>";
-      }).join("")
-    + "</tbody></table></div></div>"
-    + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"boxes\" data-size=\"16\"></i>库存预警</h3>"
-    + "<a class=\"btn btn-sm\" href=\"inventory.html\">去补货<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></div>"
-    + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th></tr></thead><tbody>"
-    + alerts.map(function (a) {
-        return "<tr><td>" + a.name + "</td><td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.current + "</td>"
-          + "<td class=\"num\">" + a.threshold + "</td><td>" + a.at + "</td><td><span class=\"pill pill-pay\">待处理</span></td></tr>";
-      }).join("")
-    + "</tbody></table></div></div>"
-    + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>数据报表与运营看板不在本期范围（见需求第 2.2 节）；此处仅展示与日常处理相关的待办数字。</div>"
-    + "<div class=\"alert alert-plain mt12\"><i data-icon=\"zap\" data-size=\"15\"></i>当前进行中的秒杀场次：" + (runningSeckill.length ? runningSeckill[0].name : "无") + "</div>";
-  mountIcons(document.getElementById("content"));
+  var content = document.getElementById("content");
+  content.innerHTML = "<div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载概览数据…</h4></div>";
+  mountIcons(content);
+
+  function total(path) {
+    return Api.get(path, { silent: true }).then(function (page) { return page.total || 0; }, function () { return 0; });
+  }
+
+  Promise.all([
+    Api.get("/v1/admin/orders?status=PENDING_SHIPMENT&page=1&size=5", { silent: true }),
+    total("/v1/admin/orders?status=PENDING_PAYMENT&page=1&size=1"),
+    Api.get("/v1/admin/inventory/alerts?status=OPEN", { silent: true }),
+    total("/v1/admin/products?page=1&size=1&status=ON_SALE"),
+    Api.get("/v1/admin/seckill/activities?page=1&size=5&status=RUNNING", { silent: true })
+  ]).then(function (res) {
+    var pendingShip = res[0] || { list: [] };
+    var pendingPayTotal = res[1] || 0;
+    var alerts = res[2] || [];
+    var onSaleTotal = res[3] || 0;
+    var running = (res[4] && res[4].list) || [];
+
+    var stats = [
+      { k: "待发货订单", v: pendingShip.total || 0, d: "需要尽快处理", icon: "package", href: "orders.html" },
+      { k: "待付款订单", v: pendingPayTotal, d: "15 分钟未付自动取消", icon: "clock", href: "orders.html" },
+      { k: "库存预警", v: alerts.length, d: "低于阈值需补货", icon: "boxes", href: "inventory.html" },
+      { k: "在售商品", v: onSaleTotal, d: "当前上架中的商品", icon: "layout-grid", href: "products.html" }
+    ];
+
+    content.innerHTML =
+      "<div class=\"stat-grid\">" + stats.map(function (s) {
+        return "<a class=\"stat\" href=\"" + s.href + "\"><div class=\"k\"><i data-icon=\"" + s.icon + "\" data-size=\"14\"></i>" + s.k + "</div>"
+          + "<div class=\"v\">" + s.v + "</div><div class=\"d\">" + s.d + "</div></a>";
+      }).join("") + "</div>"
+      + "<div class=\"panel mt12\"><div class=\"panel-head\"><h3><i data-icon=\"package\" data-size=\"16\"></i>待发货订单</h3>"
+      + "<a class=\"btn btn-sm\" href=\"orders.html\">全部订单<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></div>"
+      + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>订单号</th><th>收货人</th><th class=\"num\">实付</th><th>下单时间</th><th>操作</th></tr></thead><tbody>"
+      + ((pendingShip.list || []).length
+          ? pendingShip.list.map(function (o) {
+              return "<tr><td>" + esc(o.orderNo) + "</td><td>" + esc(o.receiverName || "—") + "</td>"
+                + "<td class=\"num price\">" + yuanPlain(o.payAmount) + "</td><td>" + formatTime(o.createdAt) + "</td>"
+                + "<td><a class=\"btn btn-sm\" href=\"orders.html?kw=" + encodeURIComponent(o.orderNo) + "\">去发货</a></td></tr>";
+            }).join("")
+          : "<tr><td colspan=\"5\"><div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"30\"></i><h4>没有待发货订单</h4></div></td></tr>")
+      + "</tbody></table></div></div>"
+      + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"boxes\" data-size=\"16\"></i>库存预警</h3>"
+      + "<a class=\"btn btn-sm\" href=\"inventory.html\">去补货<i data-icon=\"chevron-right\" data-size=\"14\"></i></a></div>"
+      + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>SKU ID</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th></tr></thead><tbody>"
+      + (alerts.length
+          ? alerts.slice(0, 5).map(function (a) {
+              return "<tr><td>SKU " + a.skuId + "</td><td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.currentStock + "</td>"
+                + "<td class=\"num\">" + a.threshold + "</td><td>" + formatTime(a.updatedAt) + "</td><td><span class=\"pill pill-pay\">待处理</span></td></tr>";
+            }).join("")
+          : "<tr><td colspan=\"5\"><div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"30\"></i><h4>暂无库存预警</h4></div></td></tr>")
+      + "</tbody></table></div></div>"
+      + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>数据报表与运营看板不在本期范围（需求 2.2 节）；此处只展示与日常处理相关的待办数字。</div>"
+      + "<div class=\"alert alert-plain mt12\"><i data-icon=\"zap\" data-size=\"15\"></i>当前进行中的秒杀场次："
+      + (running.length ? esc(running.map(function (a) { return a.name; }).join("、")) : "无") + "</div>";
+    mountIcons(content);
+  });
 }
 </script>
 </body>

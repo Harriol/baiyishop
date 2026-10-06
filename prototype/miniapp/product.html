@@ -10,57 +10,115 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/mini-shell.js"></script>
 <script>
-var pid = Number(qs("id", 1001));
-var p = P(pid) || DB.products[0];
-var chain = catPath(p.categoryId);
-var soldOut = p.stock <= 0;
-var bar = "<div class=\"m-bar\">"
-  + "<a class=\"m-btn plain\" href=\"index.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"house\" data-size=\"17\"></i><span style=\"font-size:10px\">首页</span></a>"
-  + "<a class=\"m-btn plain\" href=\"cart.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"shopping-cart\" data-size=\"17\"></i><span style=\"font-size:10px\">购物车</span></a>"
-  + "<button class=\"m-btn plain grow\" id=\"addCart\" " + (soldOut ? "disabled" : "") + ">加入购物车</button>"
-  + "<button class=\"m-btn price grow\" id=\"buy\" " + (soldOut ? "disabled" : "") + ">" + (soldOut ? "已售罄" : "立即购买") + "</button></div>";
-var body = miniShell({ title: "商品详情", back: "index.html", tabs: false, bar: bar });
-body.innerHTML =
-  "<div class=\"m-gallery\"><div class=\"main\"><img src=\"" + img(p.image) + "\" alt=\"\"></div>"
-  + "<div class=\"dots\"><i class=\"on\"></i><i></i><i></i></div></div>"
-  + "<div style=\"background:var(--surface);padding:12px\">"
-  + "<div class=\"row g6 wrap\"><span class=\"m-tag price\">" + (p.tags[0] || "自营") + "</span><span class=\"m-tag brand\">全场包邮</span><span class=\"m-tag\">7 天无理由</span></div>"
-  + "<div style=\"font-size:16px;font-weight:600;line-height:1.5;margin-top:8px\">" + p.name + "</div>"
-  + "<div class=\"row g8 mt8\"><span style=\"color:var(--price);font-size:22px;font-weight:700\">" + yuanPlain(p.price) + "</span>"
-  + "<span class=\"price-origin small\">" + yuanPlain(p.originPrice) + "</span>"
-  + "<span class=\"small faint\" style=\"margin-left:auto\">已售 " + p.sales + "</span></div></div>"
-  + "<div class=\"m-list mt12\" style=\"border-radius:0\">"
-  + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">规格</span><span class=\"m-tag brand\">默认规格</span><span class=\"small faint\" style=\"margin-left:auto\">库存 " + p.stock + "</span></div>"
-  + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">服务</span><span class=\"small\">正品保障 · 48 小时发货 · 全场包邮</span></div></div>"
-  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品参数</h3></div><div class=\"m-list\">"
-  + Object.keys(p.params).map(function (k) {
-      return "<div class=\"m-row\"><span class=\"small faint\" style=\"width:64px\">" + k + "</span><span class=\"small\">" + p.params[k] + "</span></div>";
-    }).join("") + "</div></div>"
-  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品详情</h3></div>"
-  + "<img src=\"" + img(p.image) + "\" alt=\"\" style=\"width:100%;border-radius:8px\">"
-  + "<p class=\"small muted mt8\" style=\"line-height:1.8\">本商品由百益商城自营，正品保障。下单后 48 小时内发货，发货后 7 天未确认将自动确认收货；未支付订单 15 分钟自动取消。</p></div>"
-  + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>同类推荐</h3></div><div class=\"m-grid\">"
-  + relatedList(p).slice(0, 4).map(function (x) {
-      return "<a class=\"m-card\" href=\"product.html?id=" + x.id + "\"><div class=\"ph\"><img src=\"" + img(x.image) + "\" alt=\"\"></div>"
-        + "<div class=\"in\"><div class=\"nm\">" + x.name + "</div><div class=\"pr\">" + yuanPlain(x.price) + "</div></div></a>";
-    }).join("") + "</div></div><div style=\"height:12px\"></div>";
-function relatedList(x) {
-  var ch = catPath(x.categoryId);
-  for (var i = ch.length - 1; i >= 0; i--) {
-    var ids = catIds(ch[i].id);
-    var list = DB.products.filter(function (y) { return y.status === "ON_SALE" && y.id !== x.id && ids.indexOf(y.categoryId) >= 0; })
-      .sort(function (a, b) { return b.sales - a.sales; });
-    if (list.length >= 4 || i === 0) return list;
-  }
-  return [];
+var pid = Number(qs("id", 0));
+var qty = 1;
+var body = miniShell({ title: "商品详情", back: "index.html", tabs: false, bar: "<div class=\"m-bar\" id=\"bar\"></div>" });
+body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"loader-circle\" data-size=\"30\"></i><h4>加载中…</h4></div>";
+
+if (!pid) {
+  body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"circle-alert\" data-size=\"32\"></i><h4>缺少商品参数</h4></div>";
+  mountMiniIcons(body);
+} else {
+  Promise.all([Api.get("/v1/products/" + pid), Store.categories()]).then(function (res) {
+    render(res[0]);
+  }, function (error) {
+    body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"circle-alert\" data-size=\"32\"></i><h4>商品不存在或已下架</h4><p class=\"small\">" + esc(error.message) + "</p></div>";
+    mountMiniIcons(body);
+  });
 }
-document.getElementById("addCart").onclick = function () { toast("已加入购物车", "ok"); };
-document.getElementById("buy").onclick = function () { location.href = "../checkout.html?source=BUY_NOW&id=" + p.id + "&qty=1"; };
-mountMiniIcons(body);
+
+function render(p) {
+  var skus = (p.skus || []).filter(function (s) { return s.enabled; });
+  var sku = skus[0] || null;
+  var offSale = p.status !== "ON_SALE";
+  var images = (p.images && p.images.length ? p.images : [p.mainImage]).filter(Boolean);
+  var chain = catPath(p.categoryId);
+
+  document.getElementById("bar").innerHTML =
+    "<a class=\"m-btn plain\" href=\"index.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"house\" data-size=\"17\"></i><span style=\"font-size:10px\">首页</span></a>"
+    + "<a class=\"m-btn plain\" href=\"cart.html\" style=\"width:52px;flex-direction:column;gap:0;height:44px;padding:0\"><i data-icon=\"shopping-cart\" data-size=\"17\"></i><span style=\"font-size:10px\">购物车</span></a>"
+    + "<button class=\"m-btn plain grow\" id=\"addCart\" " + (offSale || !sku ? "disabled" : "") + ">加入购物车</button>"
+    + "<button class=\"m-btn price grow\" id=\"buy\" " + (offSale || !sku ? "disabled" : "") + ">" + (offSale ? "已下架" : "立即购买") + "</button>";
+
+  body.innerHTML =
+    "<div class=\"m-gallery\"><div class=\"main\"><img src=\"" + img(images[0], "headphone-01") + "\" alt=\"" + esc(p.name) + "\"></div>"
+    + (images.length > 1 ? "<div class=\"dots\">" + images.map(function (_, i) { return "<i class=\"" + (i === 0 ? "on" : "") + "\"></i>"; }).join("") + "</div>" : "")
+    + "</div>"
+    + "<div style=\"background:var(--surface);padding:12px\">"
+    + "<div class=\"row g6 wrap\"><span class=\"m-tag price\">" + (p.brandName ? esc(p.brandName) : "自营") + "</span><span class=\"m-tag brand\">全场包邮</span><span class=\"m-tag\">7 天无理由</span></div>"
+    + "<div style=\"font-size:16px;font-weight:600;line-height:1.5;margin-top:8px\">" + esc(p.name) + "</div>"
+    + "<div class=\"row g8 mt8\"><span style=\"color:var(--price);font-size:22px;font-weight:700\">" + yuanPlain(sku ? sku.price : p.minPrice) + "</span>"
+    + "<span class=\"small faint\" style=\"margin-left:auto\">已售 " + (p.sales || 0) + "</span></div></div>"
+    + "<div class=\"m-list mt12\" style=\"border-radius:0\">"
+    + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">规格</span><span class=\"m-tag brand\">" + esc(sku ? (sku.specName || "默认规格") : "暂无可用规格") + "</span>"
+    + "<span class=\"small faint\" style=\"margin-left:auto\" id=\"stockText\">库存查询中…</span></div>"
+    + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">数量</span>"
+    + "<button class=\"m-tag\" id=\"minus\">-</button><span class=\"small\" id=\"qtyText\" style=\"margin:0 10px\">1</span><button class=\"m-tag\" id=\"plus\">+</button>"
+    + "<span class=\"small faint\" style=\"margin-left:auto\">单品限购 10 件</span></div>"
+    + "<div class=\"m-row\"><span class=\"small faint\" style=\"width:52px\">服务</span><span class=\"small\">正品保障 · 48 小时发货 · 全场包邮</span></div></div>"
+    + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品参数</h3></div><div class=\"m-list\">"
+    + ((p.params || []).length
+        ? p.params.map(function (item) {
+            return "<div class=\"m-row\"><span class=\"small faint\" style=\"width:64px\">" + esc(item.name) + "</span><span class=\"small\">" + esc(item.value) + "</span></div>";
+          }).join("")
+        : "<div class=\"m-row\"><span class=\"small faint\">暂无参数</span></div>")
+    + "</div></div>"
+    + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>商品详情</h3></div>"
+    + "<img src=\"" + img(images[0], "headphone-01") + "\" alt=\"\" style=\"width:100%;border-radius:8px\">"
+    + "<p class=\"small muted mt8\" style=\"line-height:1.8\">本商品由百益商城自营，正品保障。下单后 48 小时内发货，发货后 7 天未确认将自动确认收货；未支付订单 15 分钟自动取消。</p></div>"
+    + "<div class=\"m-sec\"><div class=\"m-sec-head\"><h3>同类推荐</h3></div><div class=\"m-grid\" id=\"related\"></div></div>"
+    + "<div style=\"height:12px\"></div>";
+  mountMiniIcons(body);
+
+  if (sku) {
+    Api.get("/v1/inventory/skus/" + sku.id + "/available", { silent: true }).then(function (data) {
+      var available = data && data.available !== null && data.available !== undefined ? data.available : null;
+      document.getElementById("stockText").textContent = available === null ? "库存 未配置" : ("库存 " + available);
+      if (available !== null && available <= 0) {
+        document.getElementById("addCart").disabled = true;
+        var buy = document.getElementById("buy");
+        buy.disabled = true;
+        buy.textContent = "已售罄";
+      }
+    }, function () { document.getElementById("stockText").textContent = "库存 —"; });
+  }
+
+  document.getElementById("minus").onclick = function () { setQty(qty - 1); };
+  document.getElementById("plus").onclick = function () { setQty(qty + 1); };
+  document.getElementById("addCart").onclick = function () {
+    if (!window.Api.isLoggedIn()) { toast("请先在「我的」里微信授权登录", "err"); return; }
+    var button = this;
+    button.disabled = true;
+    Api.post("/v1/carts/items", { skuId: sku.id, quantity: qty }).then(function () {
+      toast("已加入购物车", "ok");
+      window.Store.refreshCartCount();
+    }, function (error) { window.showError(error); }).then(function () { button.disabled = false; });
+  };
+  document.getElementById("buy").onclick = function () {
+    if (!window.Api.isLoggedIn()) { toast("请先在「我的」里微信授权登录", "err"); return; }
+    location.href = "../checkout.html?source=BUY_NOW&skuId=" + sku.id + "&qty=" + qty;
+  };
+
+  categoryProducts(p.categoryId, "sales", 1, 6).then(function (page) {
+    var list = (page.list || []).filter(function (x) { return x.id !== p.id; }).slice(0, 4);
+    document.getElementById("related").innerHTML = list.map(function (x) {
+      return "<a class=\"m-card\" href=\"product.html?id=" + x.id + "\"><div class=\"ph\"><img src=\"" + img(x.mainImage, "headphone-01") + "\" alt=\"\"></div>"
+        + "<div class=\"in\"><div class=\"nm\">" + esc(x.name) + "</div><div class=\"pr\">" + yuanPlain(x.price) + "</div></div></a>";
+    }).join("") || "<span class=\"small faint\">暂无同类商品</span>";
+    mountMiniIcons(body);
+  }, function () { /* 推荐失败不影响详情 */ });
+}
+
+function setQty(n) {
+  qty = Math.max(1, Math.min(10, n || 1));
+  document.getElementById("qtyText").textContent = qty;
+}
 </script>
 </body>
 </html>

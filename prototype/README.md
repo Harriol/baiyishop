@@ -1,7 +1,30 @@
 # 百益商城 · 产品原型
 
-> 开发前的**可点击原型**，用于确认页面结构、信息层级与交互流程。
-> 纯静态 HTML + CSS + JS，**不需要构建、不需要起服务**：双击对应入口即可在浏览器打开。
+> 产品原型，同时也是**前端页面本体**：30 个页面的 HTML/CSS 结构与交互已确认，数据层已从 mock
+> 切换为**真实后端接口**（走网关 `/api/v1/**`）。
+>
+> 页面是纯静态 HTML + CSS + 原生 JS（无框架、无打包步骤），本地用 Vite 起一个开发服务器，
+> 由它把 `/api` 反向代理到网关（`http://localhost:8080`）。
+
+## 怎么跑起来
+
+```powershell
+# 1) 后端：网关 + 8 个服务已在运行（scripts/smoke-all.ps1 ... -KeepRunning，或各自 IDE 启动）
+# 2) 前端
+cd prototype
+npm install        # 首次
+npm run dev        # http://localhost:5173
+```
+
+| 入口 | 地址 | 联调账号 |
+| --- | --- | --- |
+| 用户端 Web | `http://localhost:5173/index.html` | 自行注册（注册即登录） |
+| 运营后台 | `http://localhost:5173/admin/login.html` | `smokeadmin / Admin@2026`（超管）、`check_service / Admin@2026`（客服） |
+| 小程序原型 | `http://localhost:5173/miniapp/index.html` | 「我的 → 微信授权登录」 |
+
+也可以直接双击 HTML 打开（file://）——页面本身能渲染，但 `/api` 请求没有代理会失败，所以联调请用 `npm run dev`。
+
+`npm run build` 会把三端页面一起打包到 `prototype/dist/`（`vite.config.mjs` 已把所有 `.html` 配成入口）。
 
 ## 三个入口
 
@@ -11,12 +34,12 @@
 | 运营后台 | `admin/login.html` | 10 | 商品 / 库存 / 订单 / 首页 / 秒杀 / 权限 |
 | 微信小程序 | `miniapp/index.html` | 6 | 桌面浏览器中以手机框预览 |
 
-命令方式（任选其一）：
+命令方式（任选其一；需先起好后端）：
 
 ```
-start "" "D:\project\javaproject\baiyishop\prototype\index.html"
-start "" "D:\project\javaproject\baiyishop\prototype\admin\login.html"
-start "" "D:\project\javaproject\baiyishop\prototype\miniapp\index.html"
+start "" "http://localhost:5173/index.html"
+start "" "http://localhost:5173/admin/login.html"
+start "" "http://localhost:5173/miniapp/index.html"
 ```
 
 建议用 Chrome / Edge，窗口宽度 1280px 以上看桌面效果（小程序端固定 375×812 手机框，窄屏自动铺满）。
@@ -27,7 +50,7 @@ start "" "D:\project\javaproject\baiyishop\prototype\miniapp\index.html"
 
 | 文件 | 页面 | 对应需求 |
 | --- | --- | --- |
-| `index.html` | 首页：**左侧三级分类导航（悬停展开）** / 轮播 / 公告 / 金刚区 / 秒杀入口 / 四个楼层 | REQ-401 ~ 403、REQ-205 |
+| `index.html` | 首页：**左侧三级分类导航（悬停展开）** / 轮播 / 公告 / 金刚区 / 秒杀入口 / 楼层（后台配置，可为空态） | REQ-401 ~ 403、REQ-205 |
 | `category.html` | 分类浏览：三级分类树（可展开）+ 商品列表 + 排序 + 分页 | REQ-205 |
 | `search.html` | 搜索结果：关键词 + 一级/二级分类 / 品牌 / 价格区间筛选 + 四种排序 | REQ-301 |
 | `product.html` | 商品详情：图集、价格、库存、参数、富文本、同类推荐 | REQ-206、REQ-204 |
@@ -65,13 +88,14 @@ start "" "D:\project\javaproject\baiyishop\prototype\miniapp\index.html"
 | `admin/seckill.html` | 秒杀活动：场次列表 + 新增活动 + 结束并回补库存 | REQ-901、REQ-504 |
 | `admin/admins.html` | 管理员与角色：账号管理 + 角色分配 + 权限矩阵 | REQ-106 |
 
-**RBAC 演示**：右上角有「演示角色」切换器（超级管理员 / 运营 / 客服）。切到**客服**后：
+**RBAC（真实权限）**：角色由后台账号自身决定，不再有演示切换器。用 `check_service / Admin@2026` 登录后台（客服）后：
 
 - 侧边栏只有「订单管理」可用，其余模块显示为锁定
 - 直接打开商品 / 库存 / 首页配置等页面会看到 **403 无权限**页
 - 订单页的发货按钮变为禁用，点击提示无权限
 
 这对应设计文档里的权限边界：客服仅可查询订单与添加备注，不可发货、不可退款（R5-Q3）。
+权限码与后端 `R__seed_role_and_permission.sql` 一致（`product:read` / `order:ship` / `inventory:write` …）。
 
 ---
 
@@ -99,15 +123,28 @@ start "" "D:\project\javaproject\baiyishop\prototype\miniapp\index.html"
 3. **后台运营流程**：登录后台 → 订单发货 / 备注 → 商品上下架 → 调整库存 → 改首页配置 → 建秒杀活动。
 4. **权限验证**：切换角色为客服 → 观察菜单锁定与 403 页面。
 
-## 已知简化（原型阶段有意为之）
+## 接口对接要点
 
 | 项 | 说明 |
 | --- | --- |
-| 数据 | 全部为本地 mock（`assets/js/data.js`、`admin/assets/admin-shell.js`），无后端；刷新页面即复位 |
-| 图片 | 商品图与横幅取自 Unsplash / Lorem Picsum 的**占位图**，仅表示版式，与商品名称未必对应，开发阶段替换为 MinIO 上的真实商品图 |
-| 搜索 | 用前端关键词匹配 + 文档里的综合打分公式（销量 × 0.6 + 新鲜度 × 0.4）模拟，正式实现走 Elasticsearch |
-| 支付 | 模拟支付，点「立即支付」1.2 秒后直接成功；真实回调链路见 `docs/api.md` 4.8 |
-| 文件上传 | 后台「上传图片」只做提示，正式实现走 MinIO |
+| 请求前缀 | 页面统一以 `/api` 打头，由 Vite 代理到网关；同域部署时设 `window.BAIYI_API_BASE` 或反代 `/api` |
+| 会话 | 令牌存 localStorage；前台用 `baiyi.*`、后台用 `baiyi.admin.*`，**互不覆盖**，可同时登录 |
+| 登录态失效 | 后端返回 `10002` 时清会话并跳登录页（带 `next` 回跳）；`10003` 只提示无权限，不踢登录 |
+| 金额 | 后端一律「分」，展示时由 `Store.money()` / `yuan()` 换算成「元」 |
+| 幂等 | 下单、发起支付、抢购都带 `X-Request-Id`（`Api.uuid()` 生成） |
+| 图片 | 后台填的图片地址若不可达（如示例 `https://minio/...`），前端回退到 `assets/img/` 占位图，保证不裂图 |
+| 秒杀 | 抢购拿 `ticketId` 后每 0.7s 轮询结果，最多约 15s，仍未出结果提示稍后到订单页查看 |
+| 支付 | 走「发起支付 → 模拟渠道一键支付（真实验签 + 幂等回调）」两步；支付成功后订单状态由事件异步推进，结果页会轮询几次 |
+
+## 已知简化（有意为之）
+
+| 项 | 说明 |
+| --- | --- |
+| 文件上传 | 后端本期没有上传接口，商品主图/图集/轮播图都是**手填图片 URL**（正式实现走 MinIO 上传） |
+| 资料编辑 | `REQ-104` 后端只提供资料查询（`GET /v1/users/me`），前台「编辑资料」只做提示 |
+| 管理员管理 | 后端本期只提供管理员列表查询，后台「分配角色 / 重置密码」按钮为提示态 |
+| 搜索 | 已接 Elasticsearch（筛选 分类/品牌/价格区间 + 排序 综合/销量/价格） |
+| 支付 | 模拟渠道：真实两步接口（发起 + 回调验签幂等），一键「模拟支付」按真实回调链路走 |
 | 未覆盖 | 售后退款、优惠券积分、评价、客服 IM（本期本就不做）；后台未做数据报表 |
 
 ## 目录结构
@@ -117,15 +154,18 @@ prototype/
 ├── index.html … seckill.html         # 用户端 Web 14 页
 ├── admin/                            # 运营后台 10 页
 │   ├── assets/admin.css              # 后台外壳样式
-│   └── assets/admin-shell.js         # 角色权限模型 + 后台数据 + 页面外壳
+│   └── assets/admin-shell.js         # 登录态 + 真实权限模型 + 页面外壳
 ├── miniapp/                          # 小程序 6 页
 │   ├── assets/mini.css               # 手机框与小程序组件
-│   └── assets/mini-shell.js          # 手机框外壳与 Tab 栏
+│   └── assets/mini-shell.js          # 手机框外壳、Tab 栏与购物车角标
+├── package.json / vite.config.mjs     # Vite 开发服务器 + /api 代理 + 全站打包入口
 ├── README.md
 └── assets/
     ├── css/app.css                   # 设计系统（三端共用令牌与组件）
     ├── js/icons.js                   # 内联 lucide 图标（离线可用，46 个）
-    ├── js/data.js                    # mock 数据（分类 / 商品 / 首页 / 订单 / 秒杀）
+    ├── js/api.js                     # API 层：统一信封解包、会话存取、领域方法、错误处理
+    ├── js/store.js                   # 共享状态：分类缓存、购物车角标、金额换算、状态字典
+    ├── js/util.js                    # 小工具：图片回退、转义、时间格式化、金额换算
     ├── js/ui.js                      # 通用渲染（顶栏、页脚、商品卡、弹窗、倒计时等）
     └── img/                          # 21 张占位图
 ```

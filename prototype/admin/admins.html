@@ -10,61 +10,68 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("admins", { title: "管理员与角色", crumb: "系统", perm: "admin" })) {
-  function render() {
-    document.getElementById("list").innerHTML = ADMIN_DB.admins.map(function (a) {
-      var roles = a.roles.map(function (r) { return "<span class=\"tag tag-brand\">" + ADMIN_ROLES[r].name + "</span>"; }).join(" ");
-      return "<tr><td>" + a.username + "</td><td>" + a.realName + "</td><td>" + roles + "</td>"
-        + "<td>" + (a.status ? "<span class=\"pill pill-done\">启用</span>" : "<span class=\"pill pill-cancel\">停用</span>") + "</td>"
-        + "<td class=\"small muted\">" + a.lastLoginAt + "</td>"
-        + "<td><div class=\"table-actions\"><button class=\"btn btn-sm\" data-role=\"" + a.id + "\">分配角色</button>"
-        + "<button class=\"btn btn-sm\" data-reset=\"" + a.id + "\">重置密码</button>"
-        + "<button class=\"btn btn-sm\" data-enable=\"" + a.id + "\">" + (a.status ? "停用" : "启用") + "</button></div></td></tr>";
-    }).join("");
-    document.querySelectorAll("[data-role]").forEach(function (b) {
+if (adminShell("admins", { title: "管理员与角色", crumb: "系统", perm: "admin:read" })) {
+  var ROLES = ["SUPER_ADMIN", "OPERATOR", "SERVICE"];
+
+  function roleTags(roles) {
+    return (roles || []).map(function (r) {
+      return "<span class=\"tag tag-brand\">" + esc((ADMIN_ROLES[r] || {}).name || r) + "</span>";
+    }).join(" ") || "<span class=\"small faint\">未分配角色</span>";
+  }
+
+  function render(list) {
+    document.getElementById("list").innerHTML = list.length ? list.map(function (a) {
+      return "<tr><td>" + esc(a.username) + "</td><td>" + esc(a.realName || "—") + "</td><td>" + roleTags(a.roles) + "</td>"
+        + "<td class=\"num\">" + (a.permissions || []).length + " 项</td>"
+        + "<td><div class=\"table-actions\">"
+        + "<button class=\"btn btn-sm\" data-perms=\"" + a.id + "\">查看权限</button>"
+        + "<button class=\"btn btn-sm\" data-todo=\"角色分配\">分配角色</button>"
+        + "<button class=\"btn btn-sm\" data-todo=\"重置密码\">重置密码</button>"
+        + "</div></td></tr>";
+    }).join("") : "<tr><td colspan=\"5\"><div class=\"empty\"><i data-icon=\"shield-check\" data-size=\"30\"></i><h4>暂无管理员</h4></div></td></tr>";
+
+    document.querySelectorAll("[data-perms]").forEach(function (b) {
       b.onclick = function () {
-        var a = ADMIN_DB.admins.filter(function (x) { return x.id === Number(b.dataset.role); })[0];
-        openModal("<div class=\"form-grid\">" + Object.keys(ADMIN_ROLES).map(function (r) {
-          return "<label class=\"check\"><input type=\"checkbox\" value=\"" + r + "\" " + (a.roles.indexOf(r) >= 0 ? "checked" : "") + "><span>" + ADMIN_ROLES[r].name
-            + " <span class=\"small faint\">（" + (ADMIN_ROLES[r].perms.indexOf("*") >= 0 ? "全部权限" : ADMIN_ROLES[r].perms.length + " 项权限") + "）</span></span></label>";
-        }).join("") + "</div>", { title: "分配角色 · " + a.realName,
-          footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
-        document.getElementById("ok").onclick = function () {
-          var picked = Array.from(document.querySelectorAll(".mask input:checked")).map(function (i) { return i.value; });
-          if (!picked.length) { toast("至少选择一个角色", "err"); return; }
-          a.roles = picked; closeModal(); toast("角色已更新，该管理员下次鉴权即生效", "ok"); render();
-        };
+        var admin = list.filter(function (x) { return x.id === Number(b.dataset.perms); })[0];
+        openModal("<div class=\"small faint mb8\">" + esc(admin.realName || admin.username) + "（" + esc(admin.username) + "）</div>"
+          + "<div class=\"row g6 wrap\">" + (admin.permissions || []).map(function (p) {
+              return "<span class=\"tag\">" + esc(p) + "</span>";
+            }).join("") + "</div>",
+          { title: "权限清单", footer: "<button class=\"btn\" data-close>关闭</button>" });
       };
     });
-    document.querySelectorAll("[data-reset]").forEach(function (b) { b.onclick = function () { toast("已生成重置密码链接（原型不发送）", "ok"); }; });
-    document.querySelectorAll("[data-enable]").forEach(function (b) {
+    document.querySelectorAll("[data-todo]").forEach(function (b) {
       b.onclick = function () {
-        var a = ADMIN_DB.admins.filter(function (x) { return x.id === Number(b.dataset.enable); })[0];
-        a.status = a.status ? 0 : 1; toast(a.status ? "已启用" : "已停用，该账号无法登录", "ok"); render();
+        toast("「" + b.dataset.todo + "」接口不在本期实现范围（后端仅提供管理员列表查询）");
       };
     });
+    mountIcons(document.getElementById("content"));
   }
 
   document.getElementById("content").innerHTML =
     "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"shield-check\" data-size=\"16\"></i>管理员账号</h3>"
     + "<span class=\"small faint\">仅超级管理员可访问本模块</span></div>"
-    + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody id=\"list\"></tbody></table></div></div>"
+    + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>账号</th><th>姓名</th><th>角色</th><th class=\"num\">权限数</th><th>操作</th></tr></thead><tbody id=\"list\"></tbody></table></div></div>"
     + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"log-out\" data-size=\"16\"></i>角色权限矩阵</h3>"
     + "<span class=\"small faint\">客服仅可查询订单与添加备注，不可发货、不可退款（R5-Q3）</span></div>"
     + "<div class=\"panel-body flush table-wrap\"><table class=\"table matrix\"><thead><tr><th>功能</th>"
-    + ["SUPER_ADMIN", "OPERATOR", "SERVICE"].map(function (r) { return "<th class=\"c\">" + ADMIN_ROLES[r].name + "</th>"; }).join("") + "</tr></thead><tbody>"
-    + ADMIN_DB.PERM_MATRIX.map(function (row) {
-        return "<tr><td>" + row.name + "</td>" + ["SUPER_ADMIN", "OPERATOR", "SERVICE"].map(function (r) {
+    + ROLES.map(function (r) { return "<th class=\"c\">" + ADMIN_ROLES[r].name + "</th>"; }).join("") + "</tr></thead><tbody>"
+    + PERM_MATRIX.map(function (row) {
+        return "<tr><td>" + row.name + "</td>" + ROLES.map(function (r) {
           return "<td class=\"c\">" + (row.perms[r] ? "<i data-icon=\"check\" data-size=\"16\" style=\"color:var(--brand)\"></i>" : "<span class=\"lock\">—</span>") + "</td>";
         }).join("") + "</tr>";
       }).join("")
-    + "</tbody></table></div></div>";
-  render();
+    + "</tbody></table></div></div>"
+    + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>后端本期提供管理员列表查询（REQ-106 的只读部分）；角色分配、重置密码、停启用等写操作接口不在本期实现范围，数据来自 user 服务 RBAC 种子数据。</div>";
+
   mountIcons(document.getElementById("content"));
+  Api.get("/v1/admin/admins").then(function (list) { render(list || []); }, showError);
 }
 </script>
 </body>

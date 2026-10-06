@@ -9,61 +9,108 @@
 <body>
 <main class="container" style="max-width:720px">
 <div id="steps"></div>
-<div class="card">
-  <div class="between" style="flex-wrap:wrap;gap:10px">
-    <div><div class="small faint">订单提交成功，请在 15 分钟内完成支付</div>
-      <div class="strong mt8" id="orderNo"></div></div>
-    <div style="text-align:right"><div class="small faint">剩余支付时间</div><div class="countdown mt8" id="cd"></div></div>
-  </div>
-  <div class="amount-row total mt16"><span class="strong">应付金额</span><span class="price" id="amount"></span></div>
-</div>
-<div class="card mt12">
-  <h3 style="font-size:15px">选择支付方式</h3>
-  <div class="pay-methods mt12" id="methods">
-    <div class="pay-method on" data-c="WECHAT"><span class="pm-icon" style="color:#0f7b6c"><i data-icon="message-circle" data-size="18"></i></span>
-      <div class="grow"><div class="strong">微信支付</div><div class="small faint">模拟渠道 · 按真实接口规范设计</div></div>
-      <i data-icon="circle-check" data-size="18" style="color:var(--brand)"></i></div>
-    <div class="pay-method" data-c="ALIPAY"><span class="pm-icon" style="color:#2b5fbd"><i data-icon="wallet" data-size="18"></i></span>
-      <div class="grow"><div class="strong">支付宝</div><div class="small faint">模拟渠道 · 按真实接口规范设计</div></div>
-      <i data-icon="circle-check" data-size="18" style="color:var(--ink-3)"></i></div>
-  </div>
-  <div class="alert alert-plain mt16"><i data-icon="info" data-size="15"></i>当前为学习项目，支付为模拟实现（微信 / 支付宝测试号），不会产生真实扣款。</div>
-  <div class="row g12 mt16"><button class="btn btn-lg grow" id="cancel">取消支付</button>
-    <button class="btn btn-price btn-lg grow" id="payBtn">立即支付</button></div>
-</div>
+<div id="box"></div>
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("orders");
 document.getElementById("steps").innerHTML = stepbar(3);
-var pend = JSON.parse(sessionStorage.getItem("baiyi_pending") || "null");
-if (!pend) { pend = { orderNo: "2026092815301212345678", payAmount: "936.00", timeoutAt: new Date(Date.now() + 900000).toISOString(), items: [{ productId: 1004, quantity: 1 }] }; }
-document.getElementById("orderNo").textContent = "订单号 " + pend.orderNo;
-document.getElementById("amount").innerHTML = yuan(pend.payAmount);
-countdown(document.getElementById("cd"), pend.timeoutAt);
+
+var orderNo = qs("no", "");
+var order = null;
 var channel = "WECHAT";
-document.querySelectorAll(".pay-method").forEach(function (m) {
-  m.onclick = function () {
-    document.querySelectorAll(".pay-method").forEach(function (x) {
-      x.classList.remove("on");
-      x.querySelector("[data-icon=\"circle-check\"]").style.color = "var(--ink-3)";
-    });
-    m.classList.add("on");
-    m.querySelector("[data-icon=\"circle-check\"]").style.color = "var(--brand)";
-    channel = m.dataset.c;
-  };
-});
-document.getElementById("cancel").onclick = function () { location.href = "orders.html"; };
-document.getElementById("payBtn").onclick = function () {
-  var btn = this; btn.disabled = true; btn.textContent = "支付处理中…";
-  setTimeout(function () {
-    sessionStorage.setItem("baiyi_paid", JSON.stringify({ orderNo: pend.orderNo, payAmount: pend.payAmount, channel: channel, payTime: new Date().toLocaleString("zh-CN", { hour12: false }) }));
-    location.href = "pay-result.html?result=success";
-  }, 1200);
-};
+var paying = false;
+
+function render() {
+  var box = document.getElementById("box");
+  if (!orderNo) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"circle-alert\" data-size=\"40\"></i>"
+      + "<h4>缺少订单号</h4><p class=\"small\">请从「我的订单」或下单页进入</p>"
+      + "<a class=\"btn btn-primary mt16\" href=\"orders.html\">我的订单</a></div></div>";
+    mountIcons(box);
+    return;
+  }
+  if (!order) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载订单…</h4></div></div>";
+    mountIcons(box);
+    return;
+  }
+  if (order.status !== "PENDING_PAYMENT") {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"40\"></i>"
+      + "<h4>该订单当前为「" + esc(Store.statusText(order.status)) + "」</h4>"
+      + "<p class=\"small\">订单号 " + esc(order.orderNo) + "，无需再次支付</p>"
+      + "<a class=\"btn btn-primary mt16\" href=\"order-detail.html?no=" + encodeURIComponent(order.orderNo) + "\">查看订单</a></div></div>";
+    mountIcons(box);
+    return;
+  }
+  box.innerHTML =
+    "<div class=\"card\"><div class=\"between\" style=\"flex-wrap:wrap;gap:10px\">"
+    + "<div><div class=\"small faint\">订单提交成功，请在 15 分钟内完成支付</div>"
+    + "<div class=\"strong mt8\">订单号 " + esc(order.orderNo) + "</div></div>"
+    + "<div style=\"text-align:right\"><div class=\"small faint\">剩余支付时间</div><div class=\"countdown mt8\" id=\"cd\"></div></div>"
+    + "</div><div class=\"amount-row total mt16\"><span class=\"strong\">应付金额</span><span class=\"price\" id=\"amount\">" + yuan(order.payAmount) + "</span></div></div>"
+
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">选择支付方式</h3>"
+    + "<div class=\"pay-methods mt12\" id=\"methods\">"
+    + "<div class=\"pay-method on\" data-c=\"WECHAT\"><span class=\"pm-icon\" style=\"color:#0f7b6c\"><i data-icon=\"message-circle\" data-size=\"18\"></i></span>"
+    + "<div class=\"grow\"><div class=\"strong\">微信支付</div><div class=\"small faint\">模拟渠道 · 按真实接口规范设计</div></div>"
+    + "<i data-icon=\"circle-check\" data-size=\"18\" style=\"color:var(--brand)\"></i></div>"
+    + "<div class=\"pay-method\" data-c=\"ALIPAY\"><span class=\"pm-icon\" style=\"color:#2b5fbd\"><i data-icon=\"wallet\" data-size=\"18\"></i></span>"
+    + "<div class=\"grow\"><div class=\"strong\">支付宝</div><div class=\"small faint\">模拟渠道 · 按真实接口规范设计</div></div>"
+    + "<i data-icon=\"circle-check\" data-size=\"18\" style=\"color:var(--ink-3)\"></i></div>"
+    + "</div>"
+    + "<div class=\"alert alert-plain mt16\"><i data-icon=\"info\" data-size=\"15\"></i>当前为学习项目，支付为模拟实现（微信 / 支付宝测试号），不会产生真实扣款。</div>"
+    + "<div class=\"row g12 mt16\"><a class=\"btn btn-lg grow\" href=\"orders.html\">取消支付</a>"
+    + "<button class=\"btn btn-price btn-lg grow\" id=\"payBtn\" " + (paying ? "disabled" : "") + ">" + (paying ? "支付处理中…" : "立即支付") + "</button></div></div>";
+  mountIcons(box);
+
+  document.querySelectorAll(".pay-method").forEach(function (m) {
+    m.onclick = function () {
+      document.querySelectorAll(".pay-method").forEach(function (x) {
+        x.classList.remove("on");
+        x.querySelector("[data-icon=\"circle-check\"]").style.color = "var(--ink-3)";
+      });
+      m.classList.add("on");
+      m.querySelector("[data-icon=\"circle-check\"]").style.color = "var(--brand)";
+      channel = m.dataset.c;
+    };
+  });
+  document.getElementById("payBtn").onclick = pay;
+  countdown(document.getElementById("cd"), order.timeoutAt);
+}
+
+function pay() {
+  if (paying) return;
+  paying = true;
+  render();
+  // 1) 发起支付拿到支付单；2) 调模拟渠道一键支付（走真实验签 + 幂等回调）
+  Api.post("/v1/payments", { orderNo: orderNo, channel: channel }, { requestId: Api.uuid() }).then(function (payment) {
+    return Api.post("/v1/payments/" + encodeURIComponent(payment.paymentNo) + "/mock-pay");
+  }).then(function (payment) {
+    window.Store.refreshCartCount();
+    var ok = payment && payment.status === "SUCCESS";
+    location.href = "pay-result.html?no=" + encodeURIComponent(orderNo) + "&result=" + (ok ? "success" : "fail");
+  }, function (error) {
+    paying = false;
+    render();
+    showError(error);
+  });
+}
+
+if (requireLogin() && orderNo) {
+  Api.get("/v1/orders/" + encodeURIComponent(orderNo)).then(function (data) {
+    order = data;
+    render();
+  }, function (error) {
+    showError(error);
+  });
+}
+render();
 </script>
 </body>
 </html>

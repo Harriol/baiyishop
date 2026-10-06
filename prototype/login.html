@@ -33,11 +33,18 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/util.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
-pageInit("category");
+pageInit("login");
 var mode = "login";
+/** 只接受同目录下的相对页面，避免 open redirect */
+function nextUrl() {
+  var next = qs("next", "index.html");
+  return /^[\w.-]+\.html(\?[^\s]*)?$/.test(next) ? next : "index.html";
+}
 document.querySelectorAll("#tabs button").forEach(function (b) {
   b.onclick = function () {
     document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
@@ -51,18 +58,35 @@ document.getElementById("eye").onclick = function () {
   var p = document.getElementById("p");
   p.type = p.type === "password" ? "text" : "password";
 };
-document.getElementById("forgot").onclick = function (e) { e.preventDefault(); toast("原型不做找回密码流程"); };
+document.getElementById("forgot").onclick = function (e) { e.preventDefault(); toast("找回密码不在本期范围，请联系管理员"); };
 document.getElementById("wechat").onclick = function () { toast("微信授权登录用于小程序端，Web 端请使用账号密码"); };
+
+/* 已登录直接回跳 */
+if (Api.isLoggedIn()) {
+  location.replace(nextUrl());
+}
+
 document.getElementById("form").onsubmit = function (e) {
   e.preventDefault();
-  var u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
+  var u = document.getElementById("u").value.trim();
+  var p = document.getElementById("p").value;
+  var submit = document.getElementById("submit");
   if (!u) { toast("请输入账号", "err"); return; }
   if (p.length < 6) { toast("密码至少 6 位", "err"); return; }
-  if (mode === "register") {
-    if (p !== document.getElementById("p2").value) { toast("两次输入的密码不一致", "err"); return; }
-    toast("注册成功，正在登录…", "ok");
-  } else { toast("登录成功", "ok"); }
-  setTimeout(function () { location.href = "index.html"; }, 700);
+  if (mode === "register" && p !== document.getElementById("p2").value) {
+    toast("两次输入的密码不一致", "err"); return;
+  }
+  submit.disabled = true;
+  var action = mode === "register"
+    ? Api.register(u, p, document.getElementById("nick").value.trim()).then(function () { return Api.login(u, p); })
+    : Api.login(u, p);
+  action.then(function () {
+    toast(mode === "register" ? "注册成功，正在进入…" : "登录成功", "ok");
+    setTimeout(function () { location.href = nextUrl(); }, 600);
+  }).catch(function (error) {
+    submit.disabled = false;
+    showError(error);
+  });
 };
 mountIcons(document);
 </script>

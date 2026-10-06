@@ -24,96 +24,172 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("seckill");
-var sessions = DB.seckill.sessions;
-var running = sessions.filter(function (s) { return s.status === "RUNNING"; })[0] || sessions[0];
-var curId = running.id, timer = null;
 
-function label(s) {
-  return { RUNNING: "抢购中", NOT_STARTED: "即将开始", ENDED: "已结束" }[s.status];
+var activities = [];
+var curId = Number(qs("activity", 0)) || 0;
+var detail = null;
+var timer = null;
+var grabbing = false;
+
+function statusLabel(status) {
+  return { RUNNING: "抢购中", NOT_STARTED: "即将开始", ENDED: "已结束" }[status] || status;
 }
+
 function renderSessions() {
-  document.getElementById("sessions").innerHTML = sessions.map(function (s) {
-    return "<button data-s=\"" + s.id + "\" class=\"" + (s.id === curId ? "on" : "") + "\">" + s.name + " " + label(s) + "</button>";
+  var box = document.getElementById("sessions");
+  box.innerHTML = activities.map(function (a) {
+    return "<button data-s=\"" + a.id + "\" class=\"" + (a.id === curId ? "on" : "") + "\">" + esc(a.name) + " " + statusLabel(a.status) + "</button>";
   }).join("");
-  document.querySelectorAll("[data-s]").forEach(function (b) {
-    b.onclick = function () { curId = Number(b.dataset.s); render(); };
+  box.querySelectorAll("[data-s]").forEach(function (b) {
+    b.onclick = function () { select(Number(b.dataset.s)); };
   });
 }
-function render() {
-  var s = sessions.filter(function (x) { return x.id === curId; })[0];
-  renderSessions();
-  if (timer) clearInterval(timer);
-  var target = s.status === "NOT_STARTED" ? s.startTime : s.endTime;
-  document.getElementById("cdLabel").textContent = s.status === "NOT_STARTED" ? "距开始" : s.status === "RUNNING" ? "距结束" : "本场已结束";
-  if (s.status === "ENDED") document.getElementById("cd").innerHTML = "<b>00</b>:<b>00</b>:<b>00</b>";
-  else timer = countdown(document.getElementById("cd"), target, render);
 
-  var list = DB.seckill.items.filter(function (i) { return i.sessionId === curId; });
-  var box = document.getElementById("items");
-  if (!list.length) {
-    box.innerHTML = emptyHTML("本场暂无秒杀商品", "看看其他场次吧");
-    mountIcons(box); return;
+function render() {
+  renderSessions();
+  if (timer) { clearInterval(timer); timer = null; }
+  if (!detail) {
+    document.getElementById("items").innerHTML = "<div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载秒杀场次…</h4></div>";
+    mountIcons(document.getElementById("items"));
+    return;
   }
-  box.innerHTML = list.map(function (it) {
-    var p = P(it.productId);
-    var soldOut = it.sold >= it.total;
-    var notStarted = s.status === "NOT_STARTED", ended = s.status === "ENDED";
-    var pct = Math.round(it.sold / it.total * 100);
-    var btnText = soldOut ? "已售罄" : ended ? "已结束" : notStarted ? "即将开始" : "立即抢购";
-    var disabled = soldOut || ended || notStarted;
-    return "<div class=\"flash-item\"><img src=\"" + img(p.image) + "\" alt=\"" + p.name + "\">"
+  var status = detail.status;
+  var label = document.getElementById("cdLabel");
+  var cd = document.getElementById("cd");
+  if (status === "ENDED") {
+    label.textContent = "本场已结束";
+    cd.innerHTML = "<b>00</b>:<b>00</b>:<b>00</b>";
+  } else {
+    var target = status === "NOT_STARTED" ? detail.startTime : detail.endTime;
+    label.textContent = status === "NOT_STARTED" ? "距开始" : "距结束";
+    timer = countdown(cd, target, function () { refresh(); });
+  }
+
+  var box = document.getElementById("items");
+  var skus = detail.skus || [];
+  if (!skus.length) {
+    box.innerHTML = emptyHTML("本场暂无秒杀商品", "看看其他场次吧");
+    mountIcons(box);
+    return;
+  }
+  box.innerHTML = skus.map(function (sku) {
+    var soldOut = (sku.remaining || 0) <= 0;
+    var disabled = soldOut || status !== "RUNNING";
+    var sold = Math.max(0, (sku.allocStock || 0) - (sku.remaining || 0));
+    var pct = sku.allocStock ? Math.round(sold / sku.allocStock * 100) : 0;
+    var btnText = soldOut ? "已售罄" : status === "ENDED" ? "已结束" : status === "NOT_STARTED" ? "即将开始" : "立即抢购";
+    return "<div class=\"flash-item\"><img src=\"" + img(sku.image, "headphone-01") + "\" alt=\"" + esc(sku.productName) + "\">"
       + "<div class=\"grow\" style=\"min-width:0\">"
-      + "<a href=\"product.html?id=" + p.id + "\" class=\"clamp2 strong\">" + p.name + "</a>"
-      + "<div class=\"row g8 mt8\" style=\"flex-wrap:wrap\"><span class=\"price\" style=\"font-size:18px\">" + yuan(it.seckillPrice) + "</span>"
-      + "<span class=\"price-origin small\">" + yuanPlain(it.originPrice) + "</span>"
-      + "<span class=\"tag\">每人限购 " + it.limitPerUser + " 件</span></div>"
+      + "<a href=\"product.html?id=" + sku.productId + "\" class=\"clamp2 strong\">" + esc(sku.productName) + "</a>"
+      + "<div class=\"row g8 mt8\" style=\"flex-wrap:wrap\"><span class=\"price\" style=\"font-size:18px\">" + yuan(sku.seckillPrice) + "</span>"
+      + "<span class=\"price-origin small\">" + yuanPlain(sku.originalPrice) + "</span>"
+      + "<span class=\"tag\">每人限购 " + (sku.limitPerUser || 1) + " 件</span></div>"
       + "<div class=\"row g8 mt12\" style=\"max-width:320px\"><div class=\"progress grow\"><i style=\"width:" + pct + "%\"></i></div>"
       + "<span class=\"small faint nowrap\">已抢 " + pct + "%</span></div></div>"
       + "<div style=\"align-self:center;text-align:center;min-width:104px\">"
-      + "<div class=\"small faint mb8\">剩余 " + Math.max(0, it.total - it.sold) + " 件</div>"
-      + "<button class=\"btn " + (disabled ? "" : "btn-price") + "\" data-buy=\"" + it.id + "\" " + (disabled ? "disabled" : "") + ">" + btnText + "</button></div></div>";
+      + "<div class=\"small faint mb8\">剩余 " + Math.max(0, sku.remaining || 0) + " 件</div>"
+      + "<button class=\"btn " + (disabled ? "" : "btn-price") + "\" data-buy=\"" + sku.id + "\" " + (disabled || grabbing ? "disabled" : "") + ">" + btnText + "</button></div></div>";
   }).join("");
   mountIcons(box);
-  box.querySelectorAll("[data-buy]").forEach(function (b) { b.onclick = function () { grab(Number(b.dataset.buy)); }; });
+  box.querySelectorAll("[data-buy]").forEach(function (b) {
+    b.onclick = function () { grab(Number(b.dataset.buy)); };
+  });
 }
 
-/* 抢购：Redis 预扣 → 返回排队中 → 轮询结果（对应 REQ-903 / REQ-904） */
-function grab(itemId) {
-  var it = DB.seckill.items.filter(function (x) { return x.id === itemId; })[0];
-  var p = P(it.productId);
-  var ticket = genTicketId();
+function select(id) {
+  curId = id;
+  detail = null;
+  render();
+  refresh();
+}
+
+function refresh() {
+  if (!curId) return;
+  return Api.get("/v1/seckill/activities/" + curId).then(function (data) {
+    detail = data;
+    render();
+  }, function (error) {
+    if (!detail) showError(error);
+  });
+}
+
+/** 抢购：Redis 预扣 → 返回排队票据 → 轮询结果（REQ-903 / REQ-904） */
+function grab(activitySkuId) {
+  if (!requireLogin()) return;
+  if (grabbing) return;
+  grabbing = true;
+  render();
+  var requestId = Api.uuid();
   openModal("<div class=\"center\" style=\"flex-direction:column;gap:10px;padding:8px 0\">"
     + "<i data-icon=\"loader-circle\" data-size=\"34\" style=\"color:var(--brand)\"></i>"
     + "<div class=\"strong\">排队中…</div>"
-    + "<div class=\"small faint\">请求已提交，正在为你锁定库存</div>"
-    + "<div class=\"small faint\">票据号 " + ticket + "</div></div>", { title: "秒杀下单" });
-  setTimeout(function () {
-    if (it.sold >= it.total) { showResult(false, p, it, "已售罄"); return; }
-    it.sold += 1;
-    var no = genOrderNo();
-    sessionStorage.setItem("baiyi_pending", JSON.stringify({ orderNo: no, payAmount: it.seckillPrice, source: "SECKILL",
-      items: [{ productId: p.id, quantity: 1 }], timeoutAt: new Date(Date.now() + 900000).toISOString() }));
-    showResult(true, p, it, "", no);
+    + "<div class=\"small faint\">请求已提交，正在为你锁定库存</div></div>", { title: "秒杀下单" });
+  Api.post("/v1/seckill/activities/skus/" + activitySkuId + "/orders",
+    { quantity: 1, requestId: requestId }, { requestId: requestId }).then(function (ticket) {
+    return poll(ticket.ticketId, 0);
+  }).then(function (result) {
+    grabbing = false;
+    showResult(result);
+  }, function (error) {
+    grabbing = false;
+    closeModal();
     render();
-  }, 1500);
+    showError(error);
+  });
 }
-function showResult(ok, p, it, reason, no) {
+
+/** 轮询票据：最多约 15 秒，仍未出结果就提示稍后到订单页查看 */
+function poll(ticketId, attempt) {
+  return Api.get("/v1/seckill/results/" + encodeURIComponent(ticketId)).then(function (result) {
+    if (result.status === "SUCCESS" || result.status === "FAILED") return result;
+    if (attempt >= 20) return { ticketId: ticketId, status: "TIMEOUT", message: "抢购排队中，可稍后到「我的订单」查看结果" };
+    return new Promise(function (resolve) {
+      setTimeout(function () { resolve(poll(ticketId, attempt + 1)); }, 700);
+    });
+  });
+}
+
+function showResult(result) {
   closeModal();
+  grabbing = false;
+  var ok = result.status === "SUCCESS";
+  var skipped = result.status === "TIMEOUT";
+  render();
   openModal("<div class=\"center\" style=\"flex-direction:column;gap:10px;padding:8px 0\">"
-    + "<i data-icon=\"" + (ok ? "circle-check" : "circle-x") + "\" data-size=\"34\" style=\"color:" + (ok ? "var(--brand)" : "var(--price)") + "\"></i>"
-    + "<div class=\"strong\">" + (ok ? "抢购成功" : reason) + "</div>"
-    + "<div class=\"small faint\">" + (ok ? p.name : "很遗憾，本次没有抢到") + "</div>"
-    + (ok ? "<div class=\"small faint\">订单号 " + no + " · 请在 15 分钟内完成支付</div>" : "<div class=\"small faint\">可以看看其他场次</div>") + "</div>",
+    + "<i data-icon=\"" + (ok ? "circle-check" : skipped ? "loader-circle" : "circle-x") + "\" data-size=\"34\" style=\"color:" + (ok ? "var(--brand)" : "var(--price)") + "\"></i>"
+    + "<div class=\"strong\">" + (ok ? "抢购成功" : skipped ? "仍在排队" : esc(Store.failMessage(result.failReason, result.message))) + "</div>"
+    + (ok ? "<div class=\"small faint\">订单号 " + esc(result.orderNo) + " · 请在 15 分钟内完成支付</div>"
+        : "<div class=\"small faint\">" + esc(result.message || "可以看看其他场次") + "</div>") + "</div>",
     { title: "抢购结果", footer: ok
-        ? "<button class=\"btn\" data-close>稍后支付</button><a class=\"btn btn-price\" href=\"pay.html\">立即支付</a>"
+        ? "<button class=\"btn\" data-close>稍后支付</button><a class=\"btn btn-price\" href=\"pay.html?no=" + encodeURIComponent(result.orderNo) + "\">立即支付</a>"
         : "<button class=\"btn\" data-close>知道了</button>" });
   mountIcons(document.querySelector(".mask"));
+  if (ok) {
+    window.Store.refreshCartCount();
+    refresh();   // 抢成功后刷新剩余量与进度
+  }
 }
-render();
+
+function boot() {
+  Api.get("/v1/seckill/activities?limit=10").then(function (list) {
+    activities = list || [];
+    if (!activities.length) {
+      document.getElementById("items").innerHTML = emptyHTML("暂无秒杀活动", "等运营配置后再来看看");
+      mountIcons(document.getElementById("items"));
+      return;
+    }
+    var running = activities.filter(function (a) { return a.status === "RUNNING"; })[0];
+    select(curId && activities.some(function (a) { return a.id === curId; }) ? curId : (running || activities[0]).id);
+  }, showError);
+}
+
+boot();
 </script>
 </body>
 </html>

@@ -10,41 +10,63 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/mini-shell.js"></script>
 <script>
 var body = miniShell({ tab: "category", title: "商品分类" });
-var cur = 12;
+var cur = Number(qs("id", 0)) || 0;
+var MAX_L2 = 6;   // 每个一级分类最多展开的二级分组数，避免一次发起过多请求
+
 function render() {
   var tree = catTree();
-  var side = tree.map(function (c) {
-    var on = c.id === cur ? "on" : "";
-    return "<button data-c=\"" + c.id + "\" class=\"" + on + "\">" + c.name + "</button>";
-  }).join("");
-  var node = tree.filter(function (c) { return c.id === cur; })[0];
-  function tile(x) {
-    var first = categoryProducts(x.id, "sales")[0];
-    return "<a href=\"category.html?id=" + x.id + "\"><span class=\"ph\">"
-      + (first ? "<img src=\"" + img(first.image) + "\" alt=\"\">" : "")
-      + "</span>" + x.name + "</a>";
+  if (!tree.length) {
+    body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"layout-grid\" data-size=\"32\"></i><h4>暂无分类</h4></div>";
+    mountMiniIcons(body);
+    return;
   }
-  var main = node.children.map(function (l2) {
-    var prods = categoryProducts(l2.id, "sales").slice(0, 2);
-    function card(p) {
-      return "<a class=\"m-card\" href=\"product.html?id=" + p.id + "\"><div class=\"ph\"><img src=\"" + img(p.image) + "\" alt=\"\"></div>"
-        + "<div class=\"in\"><div class=\"nm\">" + p.name + "</div><div class=\"pr\">" + yuanPlain(p.price) + "</div></div></a>";
-    }
-    return "<h4>" + l2.name + "</h4><div class=\"grid3\">" + l2.children.map(tile).join("") + "</div>"
-      + (prods.length ? "<div class=\"m-grid\" style=\"margin-bottom:14px\">" + prods.map(card).join("") + "</div>" : "");
+  if (!cur || !tree.some(function (c) { return c.id === cur; })) cur = tree[0].id;
+  var node = tree.filter(function (c) { return c.id === cur; })[0];
+  var side = tree.map(function (c) {
+    return "<button data-c=\"" + c.id + "\" class=\"" + (c.id === cur ? "on" : "") + "\">" + esc(c.name) + "</button>";
   }).join("");
-  body.innerHTML = "<div class=\"m-cats\"><div class=\"side\">" + side + "</div><div class=\"main\">" + main + "</div></div>";
+  body.innerHTML = "<div class=\"m-cats\"><div class=\"side\">" + side + "</div><div class=\"main\" id=\"catMain\">"
+    + "<div class=\"empty\" style=\"padding-top:50px\"><i data-icon=\"loader-circle\" data-size=\"26\"></i><h4>加载中…</h4></div></div></div>";
   body.querySelectorAll("[data-c]").forEach(function (b) {
     b.onclick = function () { cur = Number(b.dataset.c); render(); };
   });
-  mountMiniIcons(body);
+
+  var groups = (node.children || []).slice(0, MAX_L2);
+  if (!groups.length) {
+    document.getElementById("catMain").innerHTML = "<div class=\"empty\" style=\"padding-top:50px\"><i data-icon=\"layout-grid\" data-size=\"26\"></i><h4>该分类下暂无子分类</h4></div>";
+    mountMiniIcons(body);
+    return;
+  }
+  Promise.all(groups.map(function (l2) {
+    return categoryProducts(l2.id, "sales", 1, 2).then(function (page) { return { l2: l2, list: page.list || [] }; }, function () { return { l2: l2, list: [] }; });
+  })).then(function (result) {
+    document.getElementById("catMain").innerHTML = result.map(function (row) {
+      var tiles = (row.l2.children || []).map(function (l3) {
+        return "<a href=\"category.html?id=" + l3.id + "\"><span class=\"ph\"></span>" + esc(l3.name) + "</a>";
+      }).join("");
+      var cards = row.list.map(function (p) {
+        return "<a class=\"m-card\" href=\"product.html?id=" + p.id + "\"><div class=\"ph\"><img src=\"" + img(p.mainImage, "headphone-01") + "\" alt=\"\"></div>"
+          + "<div class=\"in\"><div class=\"nm\">" + esc(p.name) + "</div><div class=\"pr\">" + yuanPlain(p.price) + "</div></div></a>";
+      }).join("");
+      return "<h4>" + esc(row.l2.name) + "</h4>"
+        + (tiles ? "<div class=\"grid3\">" + tiles + "</div>" : "")
+        + (cards ? "<div class=\"m-grid\" style=\"margin-bottom:14px\">" + cards + "</div>" : "");
+    }).join("");
+    mountMiniIcons(body);
+  });
 }
-render();
+
+Store.categories().then(render, function (error) {
+  body.innerHTML = "<div class=\"empty\" style=\"padding-top:80px\"><i data-icon=\"circle-alert\" data-size=\"32\"></i><h4>分类加载失败</h4><p class=\"small\">" + esc(error.message) + "</p></div>";
+  mountMiniIcons(body);
+});
 </script>
 </body>
 </html>

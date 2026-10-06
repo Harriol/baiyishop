@@ -10,81 +10,230 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "product" })) {
-  var editId = Number(qs("id", 0));
-  var cur = editId ? P(editId) : null;
-  var chain = cur ? catPath(cur.categoryId) : [];
-  var skuCode = cur ? cur.id + "-01" : "保存后自动生成（商品 ID + 序号）";
+if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "product:write" })) {
+  var editId = Number(qs("id", 0)) || 0;
+  var categories = [];      // 扁平（含隐藏），用于三级级联
+  var tree = [];
+  var brands = [];
+  var templates = [];
+  var product = null;
+  var skuStock = null;
+  var saving = false;
 
-  function opts(list, sel, fmt) {
-    return list.map(function (x) { return "<option value=\"" + x.id + "\"" + (x.id === sel ? " selected" : "") + ">" + (fmt ? fmt(x) : x.name) + "</option>"; }).join("");
+  function flatten(nodes, out) {
+    (nodes || []).forEach(function (n) {
+      out.push(n);
+      flatten(n.children, out);
+    });
+    return out;
+  }
+
+  function childrenOf(parentId) {
+    return categories.filter(function (c) { return (c.parentId || 0) === Number(parentId); });
+  }
+
+  function options(list, selected, withEmpty) {
+    return (withEmpty ? "<option value=\"\">请选择</option>" : "")
+      + list.map(function (c) {
+        return "<option value=\"" + c.id + "\"" + (Number(selected) === c.id ? " selected" : "") + ">" + esc(c.name) + "</option>";
+      }).join("");
   }
 
   function paintL2() {
     var l1 = Number(document.getElementById("f-cat1").value);
-    var kids = catTree().filter(function (c) { return c.id === l1; })[0].children;
-    document.getElementById("f-cat2").innerHTML = opts(kids, chain[1] ? chain[1].id : 0);
+    if (!l1) {
+      document.getElementById("f-cat2").innerHTML = "";
+      document.getElementById("f-cat3").innerHTML = "";
+      return;
+    }
+    var l2 = childrenOf(l1);
+    var current = product ? catAt(product.categoryId, 2) : null;
+    document.getElementById("f-cat2").innerHTML = options(l2, current ? current.id : 0, true);
+    if (!l2.length) { document.getElementById("f-cat2").innerHTML = ""; paintL3(); return; }
+    if (!current) document.getElementById("f-cat2").value = "";
     paintL3();
   }
+
   function paintL3() {
     var l2 = Number(document.getElementById("f-cat2").value);
-    var node = catTree().filter(function (c) { return c.id === Number(document.getElementById("f-cat1").value); })[0]
-      .children.filter(function (c) { return c.id === l2; })[0];
-    document.getElementById("f-cat3").innerHTML = opts(node.children || [], chain[2] ? chain[2].id : 0);
+    var l3 = l2 ? childrenOf(l2) : [];
+    var current = product ? catAt(product.categoryId, 3) : null;
+    document.getElementById("f-cat3").innerHTML = options(l3, current ? current.id : 0, true);
+    if (!l3.length) document.getElementById("f-cat3").innerHTML = "";
   }
 
-  var paramNames = ["材质", "产地", "重量", "规格"];
-  document.getElementById("content").innerHTML =
-    "<div class=\"panel\"><div class=\"panel-head\"><h3>" + (cur ? "编辑商品 · " + cur.name : "新增商品") + "</h3>"
-    + "<div class=\"inline\"><a class=\"btn btn-sm\" href=\"products.html\">返回列表</a><button class=\"btn btn-primary btn-sm\" id=\"save\">保存商品</button></div></div>"
-    + "<div class=\"panel-body\"><div class=\"form-grid\">"
-    + "<div class=\"form-section\">基础信息</div>"
-    + "<div class=\"form-row\"><label>商品名称</label><div><input class=\"input\" id=\"f-name\" value=\"" + (cur ? cur.name : "") + "\" placeholder=\"请输入商品名称\"></div></div>"
-    + "<div class=\"form-row\"><label>商品分类</label><div class=\"inline\">"
-    + "<select class=\"select\" id=\"f-cat1\" style=\"min-width:140px\">" + opts(catTree(), chain[0] ? chain[0].id : null) + "</select>"
-    + "<select class=\"select\" id=\"f-cat2\" style=\"min-width:140px\"></select>"
-    + "<select class=\"select\" id=\"f-cat3\" style=\"min-width:140px\"></select></div></div>"
-    + "<div class=\"form-row\"><label>品牌</label><div><select class=\"select\" id=\"f-brand\">" + opts(DB.brands, cur ? cur.brandId : null) + "</select></div></div>"
-    + "<div class=\"form-row\"><label>主图</label><div><div class=\"inline\"><img src=\"" + img(cur ? cur.image : "tee-01") + "\" alt=\"\" style=\"width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--line)\">"
-      + "<div><button class=\"btn btn-sm\" id=\"up\"><i data-icon=\"plus\" data-size=\"14\"></i>上传图片</button><div class=\"hint\">正式实现上传到 MinIO，返回 URL（REQ-203）</div></div></div></div></div>"
-    + "<div class=\"form-section\">价格与库存</div>"
-    + "<div class=\"form-row\"><label>SKU</label><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>规格名</th><th>SKU 编码</th><th>价格（元）</th><th>库存</th></tr></thead><tbody><tr>"
-    + "<td><input class=\"input\" value=\"默认规格\" style=\"min-width:110px\"></td>"
-    + "<td><code class=\"small muted\">" + skuCode + "</code></td>"
-    + "<td><input class=\"input\" id=\"f-price\" value=\"" + (cur ? cur.price : "") + "\" style=\"width:110px\"></td>"
-    + "<td><input class=\"input\" id=\"f-stock\" value=\"" + (cur ? cur.stock : "") + "\" style=\"width:100px\"></td>"
-    + "</tr></tbody></table><div class=\"hint\">本期为单规格，保留 SKU 结构（每商品一个默认 SKU）</div></div></div>"
-    + "<div class=\"form-section\">商品参数</div>"
-    + "<div class=\"form-row\"><label>参数模板</label><div><select class=\"select\" id=\"f-tpl\"><option>通用参数模板</option><option>服饰类参数</option><option>数码类参数</option></select>"
-      + "<div class=\"hint\">参数项由后台统一维护，商品从模板中选择参数项并填值（REQ-204）</div></div></div>"
-    + "<div class=\"form-row\"><label>参数值</label><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th style=\"width:120px\">参数项</th><th>值</th></tr></thead><tbody>"
-    + paramNames.map(function (n) {
-        var val = cur && cur.params[n] ? cur.params[n] : "";
-        return "<tr><td>" + n + "</td><td><input class=\"input\" value=\"" + val + "\" placeholder=\"请输入" + n + "\"></td></tr>";
-      }).join("")
-    + "</tbody></table></div></div>"
-    + "<div class=\"form-section\">商品详情</div>"
-    + "<div class=\"form-row\"><label>详情</label><div><textarea class=\"textarea\" rows=\"6\" placeholder=\"富文本详情\">" + (cur ? "商品详情富文本内容（正式实现为富文本编辑器，入库前做 XSS 白名单过滤）" : "") + "</textarea></div></div>"
-    + "<div class=\"form-row\"><label></label><div class=\"inline\"><button class=\"btn btn-primary\" id=\"save2\">保存商品</button><a class=\"btn\" href=\"products.html\">取消</a></div></div>"
-    + "</div></div></div>";
-  document.getElementById("f-cat1").onchange = paintL2;
-  document.getElementById("f-cat2").onchange = paintL3;
-  paintL2();
-  function save() {
-    var name = document.getElementById("f-name").value.trim();
-    if (!name) { toast("请填写商品名称", "err"); return; }
-    if (!Number(document.getElementById("f-price").value)) { toast("请填写正确的价格", "err"); return; }
-    toast("保存成功，商品索引同步任务已投递", "ok");
-    setTimeout(function () { location.href = "products.html"; }, 800);
+  /** 商品分类在某一层级上的节点 */
+  function catAt(categoryId, level) {
+    var node = categories.filter(function (c) { return c.id === Number(categoryId); })[0];
+    while (node && node.level > level) node = categories.filter(function (c) { return c.id === node.parentId; })[0];
+    return node && node.level === level ? node : null;
   }
-  document.getElementById("save").onclick = save;
-  document.getElementById("save2").onclick = save;
-  document.getElementById("up").onclick = function () { toast("原型不做真实上传，正式实现走 MinIO"); };
-  mountIcons(document.getElementById("content"));
+
+  /** 取最深的已选分类：后端要求 categoryId 为叶子 */
+  function pickedCategory() {
+    var l3 = Number(document.getElementById("f-cat3").value || 0);
+    if (l3) return l3;
+    var l2 = Number(document.getElementById("f-cat2").value || 0);
+    if (l2) return l2;
+    return Number(document.getElementById("f-cat1").value || 0);
+  }
+
+  function currentTemplate() {
+    var id = Number(document.getElementById("f-tpl").value || 0);
+    return templates.filter(function (t) { return t.id === id; })[0] || null;
+  }
+
+  function paintParams() {
+    var tpl = currentTemplate();
+    var box = document.getElementById("paramRows");
+    if (!tpl || !tpl.items || !tpl.items.length) {
+      box.innerHTML = "<tr><td colspan=\"2\" class=\"small faint\">该模板下暂无参数项</td></tr>";
+      return;
+    }
+    var values = {};
+    ((product && product.params) || []).forEach(function (p) { values[p.name] = p.value; });
+    box.innerHTML = tpl.items.map(function (item) {
+      return "<tr><td>" + esc(item.name) + (item.unit ? "（" + esc(item.unit) + "）" : "") + "</td>"
+        + "<td><input class=\"input\" data-param=\"" + item.id + "\" data-name=\"" + esc(item.name) + "\" value=\"" + esc(values[item.name] || "") + "\" placeholder=\"请输入" + esc(item.name) + "\"></td></tr>";
+    }).join("");
+  }
+
+  function renderForm() {
+    var chain1 = product ? catAt(product.categoryId, 1) : null;
+    var sku = product && product.skus && product.skus.length ? product.skus[0] : null;
+    document.getElementById("content").innerHTML =
+      "<div class=\"panel\"><div class=\"panel-head\"><h3>" + (product ? "编辑商品 · " + esc(product.name) : "新增商品") + "</h3>"
+      + "<div class=\"inline\"><a class=\"btn btn-sm\" href=\"products.html\">返回列表</a><button class=\"btn btn-primary btn-sm\" id=\"save\">保存商品</button></div></div>"
+      + "<div class=\"panel-body\"><div class=\"form-grid\">"
+      + "<div class=\"form-section\">基础信息</div>"
+      + "<div class=\"form-row\"><label>商品名称</label><div><input class=\"input\" id=\"f-name\" value=\"" + esc(product ? product.name : "") + "\" placeholder=\"请输入商品名称\"></div></div>"
+      + "<div class=\"form-row\"><label>商品分类</label><div class=\"inline\">"
+      + "<select class=\"select\" id=\"f-cat1\" style=\"min-width:140px\">" + options(tree, chain1 ? chain1.id : 0, true) + "</select>"
+      + "<select class=\"select\" id=\"f-cat2\" style=\"min-width:140px\"></select>"
+      + "<select class=\"select\" id=\"f-cat3\" style=\"min-width:140px\"></select>"
+      + "<div class=\"hint\">分类最多三级，商品必须挂在叶子分类下</div></div></div>"
+      + "<div class=\"form-row\"><label>品牌</label><div><select class=\"select\" id=\"f-brand\">"
+      + "<option value=\"\">不指定品牌</option>"
+      + brands.map(function (b) { return "<option value=\"" + b.id + "\"" + (product && product.brandId === b.id ? " selected" : "") + ">" + esc(b.name) + "</option>"; }).join("")
+      + "</select></div></div>"
+      + "<div class=\"form-row\"><label>主图 URL</label><div><input class=\"input\" id=\"f-main\" value=\"" + esc(product ? product.mainImage : "") + "\" placeholder=\"https://minio/baiyishop/xxx.jpg\">"
+      + "<div class=\"hint\">当前未接入上传接口，直接填写图片地址；本地联调可用 assets/img 下的占位图名（如 headphone-01）</div></div></div>"
+      + "<div class=\"form-row\"><label>图集 URL</label><div><input class=\"input\" id=\"f-images\" value=\"" + esc(((product && product.images) || []).join(",")) + "\" placeholder=\"多个地址用英文逗号分隔\">"
+      + "<div class=\"hint\">首图与主图一致；正式实现为上传到 MinIO 返回 URL（REQ-203）</div></div></div>"
+      + "<div class=\"form-section\">SKU 与价格</div>"
+      + "<div class=\"form-row\"><label>SKU</label><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>规格名</th><th>SKU 编码</th><th>价格（元）</th><th>库存</th><th>启用</th></tr></thead><tbody><tr>"
+      + "<td><input class=\"input\" id=\"f-spec\" value=\"" + esc(sku ? sku.specName : "默认规格") + "\" style=\"min-width:110px\"></td>"
+      + "<td><code class=\"small muted\">" + (sku ? esc(sku.skuCode) : "保存后自动生成（商品 ID + 序号）") + "</code></td>"
+      + "<td><input class=\"input\" id=\"f-price\" value=\"" + (sku ? Store.money(sku.price) : "") + "\" style=\"width:110px\" placeholder=\"59.00\"></td>"
+      + "<td><span class=\"small muted\" id=\"f-stock\">" + (sku ? "查询中…" : "创建后为 0，请在库存管理调整") + "</span></td>"
+      + "<td><input type=\"checkbox\" id=\"f-enabled\" " + (!sku || sku.enabled ? "checked" : "") + "></td>"
+      + "</tr></tbody></table><div class=\"hint\">本期为单规格，保留 SKU 结构（每商品一个默认 SKU）</div></div></div>"
+      + "<div class=\"form-section\">商品参数</div>"
+      + "<div class=\"form-row\"><label>参数模板</label><div><select class=\"select\" id=\"f-tpl\">"
+      + (templates.length
+          ? templates.map(function (t) { return "<option value=\"" + t.id + "\">" + esc(t.name) + "</option>"; }).join("")
+          : "<option value=\"\">（暂无可用模板）</option>")
+      + "</select><div class=\"hint\">参数项由后台统一维护，商品从模板中选择参数项并填值（REQ-204）</div></div></div>"
+      + "<div class=\"form-row\"><label>参数值</label><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th style=\"width:160px\">参数项</th><th>值</th></tr></thead><tbody id=\"paramRows\"></tbody></table></div></div>"
+      + "<div class=\"form-section\">商品详情</div>"
+      + "<div class=\"form-row\"><label>详情</label><div><textarea class=\"textarea\" id=\"f-detail\" rows=\"6\" placeholder=\"富文本详情\">" + esc(product ? (product.detail || "") : "") + "</textarea>"
+      + "<div class=\"hint\">入库前做 XSS 白名单过滤</div></div></div>"
+      + "<div class=\"form-row\"><label>上架</label><div><label class=\"check\"><input type=\"checkbox\" id=\"f-onsale\" " + (!product || product.status === "ON_SALE" ? "checked" : "") + "><span>保存后立即上架（前台可见）</span></label></div></div>"
+      + "<div class=\"form-row\"><label></label><div class=\"inline\"><button class=\"btn btn-primary\" id=\"save2\">保存商品</button><a class=\"btn\" href=\"products.html\">取消</a></div></div>"
+      + "</div></div></div>";
+
+    document.getElementById("f-cat1").onchange = paintL2;
+    document.getElementById("f-cat2").onchange = paintL3;
+    document.getElementById("f-tpl").onchange = paintParams;
+    paintL2();
+    paintParams();
+    document.getElementById("save").onclick = save;
+    document.getElementById("save2").onclick = save;
+    mountIcons(document.getElementById("content"));
+
+    if (sku) {
+      Api.get("/v1/inventory/skus/" + sku.id + "/available", { silent: true }).then(function (data) {
+        skuStock = data;
+        document.getElementById("f-stock").innerHTML = "<a href=\"inventory.html?skuId=" + sku.id + "\">" + data.available + "（去调整）</a>";
+      }, function () {
+        document.getElementById("f-stock").textContent = "—";
+      });
+    }
+  }
+
+  function save() {
+    if (saving) return;
+    var categoryId = pickedCategory();
+    var name = document.getElementById("f-name").value.trim();
+    var mainImage = document.getElementById("f-main").value.trim();
+    var priceYuan = document.getElementById("f-price").value.trim();
+    if (!name) { toast("请填写商品名称", "err"); return; }
+    if (!categoryId) { toast("请选择商品分类", "err"); return; }
+    // 选了非叶子分类会被后端拒绝，这里提前给出明确提示
+    if (childrenOf(categoryId).length) { toast("该分类下还有子分类，请选择最末级分类", "err"); return; }
+    if (!mainImage) { toast("请填写主图地址", "err"); return; }
+    if (!/^\d+(\.\d{1,2})?$/.test(priceYuan) || Number(priceYuan) <= 0) { toast("请填写正确的价格（元，最多两位小数）", "err"); return; }
+
+    var params = [];
+    document.querySelectorAll("[data-param]").forEach(function (input) {
+      var value = input.value.trim();
+      if (value) params.push({ paramItemId: Number(input.dataset.param), value: value });
+    });
+
+    var images = document.getElementById("f-images").value.split(",")
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return s; });
+
+    var body = {
+      name: name,
+      categoryId: categoryId,
+      brandId: document.getElementById("f-brand").value ? Number(document.getElementById("f-brand").value) : null,
+      mainImage: mainImage,
+      images: images,
+      detail: document.getElementById("f-detail").value,
+      onSale: document.getElementById("f-onsale").checked,
+      params: params,
+      skus: [{
+        specName: document.getElementById("f-spec").value.trim() || "默认规格",
+        price: Math.round(Number(priceYuan) * 100),
+        image: null,
+        sort: 0,
+        enabled: document.getElementById("f-enabled").checked
+      }]
+    };
+
+    saving = true;
+    [document.getElementById("save"), document.getElementById("save2")].forEach(function (b) { if (b) b.disabled = true; });
+    var request = editId ? Api.put("/v1/admin/products/" + editId, body) : Api.post("/v1/admin/products", body);
+    request.then(function () {
+      toast("保存成功，商品索引同步任务已投递", "ok");
+      setTimeout(function () { location.href = "products.html"; }, 700);
+    }, function (error) {
+      saving = false;
+      [document.getElementById("save"), document.getElementById("save2")].forEach(function (b) { if (b) b.disabled = false; });
+      showError(error);
+    });
+  }
+
+  Promise.all([
+    Api.get("/v1/admin/categories"),
+    Api.get("/v1/brands", { silent: true }).then(function (list) { return list || []; }, function () { return []; }),
+    Api.get("/v1/admin/params/templates", { silent: true }).then(function (list) { return list || []; }, function () { return []; }),
+    editId ? Api.get("/v1/admin/products/" + editId) : Promise.resolve(null)
+  ]).then(function (res) {
+    tree = res[0] || [];
+    categories = flatten(tree, []);
+    brands = res[1];
+    templates = res[2].filter(function (t) { return t.enabled !== false; });
+    product = res[3];
+    renderForm();
+  }, showError);
 }
 </script>
 </body>

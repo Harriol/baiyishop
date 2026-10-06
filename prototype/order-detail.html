@@ -13,94 +13,148 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("orders");
-var no = qs("no", DB.orders[0].orderNo);
-var o = DB.orders.filter(function (x) { return x.orderNo === no; })[0] || DB.orders[0];
-function deadline(or) {
-  var t = new Date(String(or.timeoutAt || "").replace(/-/g, "/"));
-  if (isNaN(t.getTime()) || t.getTime() < Date.now()) return new Date(Date.now() + 14 * 60000 + 32000);
-  return t;
+
+var orderNo = qs("no", "");
+var order = null;
+
+var HEADLINE = {
+  PENDING_PAYMENT: "等待付款",
+  PENDING_SHIPMENT: "商家正在备货",
+  PENDING_RECEIPT: "商品运输中",
+  COMPLETED: "交易已完成",
+  CANCELLED: "订单已关闭"
+};
+
+function actions(o) {
+  var no = encodeURIComponent(o.orderNo);
+  if (o.status === "PENDING_PAYMENT") {
+    return "<a class=\"btn btn-price\" href=\"pay.html?no=" + no + "\">立即支付</a>"
+      + "<button class=\"btn\" data-cancel=\"" + o.orderNo + "\">取消订单</button>";
+  }
+  if (o.status === "PENDING_SHIPMENT") return "<button class=\"btn\" data-remind>提醒发货</button>";
+  if (o.status === "PENDING_RECEIPT") return "<button class=\"btn btn-primary\" data-receive=\"" + o.orderNo + "\">确认收货</button>";
+  return "<button class=\"btn\" data-again>" + (o.status === "COMPLETED" ? "再次购买" : "重新购买") + "</button>";
 }
-function actions(or) {
-  var n = or.orderNo;
-  if (or.status === "PENDING_PAYMENT") return "<a class=\"btn btn-price\" href=\"pay.html\">立即支付</a>"
-    + "<button class=\"btn\" data-cancel=\"" + n + "\">取消订单</button>";
-  if (or.status === "PENDING_SHIPMENT") return "<button class=\"btn\" data-remind=\"" + n + "\">提醒发货</button>";
-  if (or.status === "PENDING_RECEIPT") return "<button class=\"btn btn-primary\" data-receive=\"" + n + "\">确认收货</button>";
-  if (or.status === "COMPLETED") return "<button class=\"btn\" data-again=\"" + n + "\">再次购买</button>";
-  return "<button class=\"btn\" data-delorder=\"" + n + "\">删除订单</button>"
-    + "<button class=\"btn btn-primary\" data-again=\"" + n + "\">再次购买</button>";
+
+function timeline(o) {
+  var logs = o.statusLogs || [];
+  if (!logs.length) {
+    return "<li class=\"done\"><div class=\"strong\">提交订单</div><div class=\"small muted\">订单创建成功，库存已锁定</div>"
+      + "<div class=\"small faint\">" + formatTime(o.createdAt) + "</div></li>";
+  }
+  return logs.map(function (log) {
+    var title = log.fromStatus ? Store.statusText(log.fromStatus) + " → " + Store.statusText(log.toStatus) : Store.statusText(log.toStatus);
+    return "<li class=\"done\"><div class=\"strong\">" + esc(title) + "</div>"
+      + "<div class=\"small muted\">" + esc(log.reason || operatorText(log.operatorType)) + "</div>"
+      + "<div class=\"small faint\">" + formatTime(log.createdAt) + "</div></li>";
+  }).join("");
 }
-function log() {
-  var rows = [{ t: o.createdAt, s: "提交订单", d: "订单创建成功，库存已锁定" }];
-  if (o.status === "CANCELLED") { rows.push({ t: o.cancelTime || "—", s: "订单已取消", d: o.cancelReason || "用户取消" }); return rows; }
-  if (o.payTime) rows.push({ t: o.payTime, s: "支付成功", d: (o.payType === "ALIPAY" ? "支付宝" : "微信支付") + "（模拟渠道）" });
-  if (o.shipTime) rows.push({ t: o.shipTime, s: "商家已发货", d: "运单号 " + o.trackingNo });
-  if (o.receiveTime) rows.push({ t: o.receiveTime, s: "确认收货", d: "订单已完成" });
-  return rows;
+
+function operatorText(type) {
+  return { USER: "用户操作", ADMIN: "商家操作", SYSTEM: "系统自动处理" }[type] || type || "";
 }
-var pending = o.status === "PENDING_PAYMENT";
-document.getElementById("box").innerHTML =
-  "<div class=\"card\"><div class=\"between\" style=\"flex-wrap:wrap;gap:12px\">"
-  + "<div><div class=\"row g12\">" + statusPill(o.status) + "<span class=\"strong\">" + ({ PENDING_PAYMENT: "等待付款", PENDING_SHIPMENT: "商家正在备货", PENDING_RECEIPT: "商品运输中", COMPLETED: "交易已完成", CANCELLED: "订单已关闭" }[o.status]) + "</span></div>"
-  + "<div class=\"small faint mt8\">" + (pending ? "请在倒计时结束前完成支付，超时订单将自动取消并释放库存" : "订单号 " + o.orderNo) + "</div></div>"
-  + (pending ? "<div style=\"text-align:right\"><div class=\"small faint\">剩余支付时间</div><div class=\"countdown mt8\" id=\"cd\"></div></div>" : "")
-  + "</div>"
-  + (o.trackingNo ? "<div class=\"alert mt16\"><i data-icon=\"truck\" data-size=\"16\"></i>运单号 " + o.trackingNo + " · 全场包邮，物流轨迹对接不在本期范围</div>" : "")
-  + "<div class=\"row g12 mt16\" style=\"flex-wrap:wrap\">" + actions(o) + "</div></div>"
 
-  + "<div class=\"card mt12\"><h3 style=\"font-size:15px;display:flex;align-items:center;gap:6px\"><i data-icon=\"map-pin\" data-size=\"16\"></i>收货信息</h3>"
-  + "<div class=\"mt12\">" + o.receiver + "</div>"
-  + "<div class=\"small faint mt8\">下单时留存快照，后续修改地址不影响本订单</div></div>"
+function render() {
+  var box = document.getElementById("box");
+  if (!order) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载订单…</h4></div></div>";
+    mountIcons(box);
+    return;
+  }
+  var o = order;
+  var pending = o.status === "PENDING_PAYMENT";
+  var receiver = o.receiver || {};
+  box.innerHTML =
+    "<div class=\"card\"><div class=\"between\" style=\"flex-wrap:wrap;gap:12px\">"
+    + "<div><div class=\"row g12\">" + statusPill(o.status) + "<span class=\"strong\">" + esc(HEADLINE[o.status] || o.statusLabel || "") + "</span></div>"
+    + "<div class=\"small faint mt8\">" + (pending ? "请在倒计时结束前完成支付，超时订单将自动取消并释放库存" : "订单号 " + esc(o.orderNo)) + "</div></div>"
+    + (pending ? "<div style=\"text-align:right\"><div class=\"small faint\">剩余支付时间</div><div class=\"countdown mt8\" id=\"cd\"></div></div>" : "")
+    + "</div>"
+    + (o.trackingNo ? "<div class=\"alert mt16\"><i data-icon=\"truck\" data-size=\"16\"></i>运单号 " + esc(o.trackingNo) + " · 全场包邮，物流轨迹对接不在本期范围</div>" : "")
+    + "<div class=\"row g12 mt16\" style=\"flex-wrap:wrap\">" + actions(o) + "</div></div>"
 
-  + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">商品明细</h3>"
-  + o.items.map(function (i) {
-      var p = P(i.productId);
-      return "<div class=\"order-line\"><img src=\"" + img(p.image) + "\" alt=\"\">"
-        + "<div class=\"grow\"><a href=\"product.html?id=" + p.id + "\" class=\"clamp2\" style=\"font-weight:500\">" + p.name + "</a>"
-        + "<div class=\"small faint mt8\">默认规格</div></div>"
-        + "<div style=\"text-align:right\" class=\"small muted\">" + yuanPlain(p.price) + "<br>x" + i.quantity + "</div>"
-        + "<div style=\"width:100px;text-align:right\" class=\"price\">" + yuan(mul(p.price, i.quantity)) + "</div></div>";
-    }).join("")
-  + "<div class=\"mt12\"><div class=\"amount-row\"><span class=\"muted\">商品金额</span><span>" + yuanPlain(o.totalAmount) + "</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">运费</span><span>" + yuanPlain("0.00") + " <span class=\"tag tag-brand\">全场包邮</span></span></div>"
-  + "<div class=\"amount-row total\"><span class=\"strong\">实付金额</span><span class=\"price\">" + yuan(o.payAmount) + "</span></div></div></div>"
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px;display:flex;align-items:center;gap:6px\"><i data-icon=\"map-pin\" data-size=\"16\"></i>收货信息</h3>"
+    + "<div class=\"mt12\">" + esc(receiver.name || "") + " " + esc(receiver.phone || "") + "<div class=\"small muted mt8\">" + esc(receiver.address || "") + "</div></div>"
+    + "<div class=\"small faint mt8\">下单时留存快照，后续修改地址不影响本订单</div></div>"
 
-  + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单信息</h3>"
-  + "<div class=\"mt12\"><div class=\"amount-row\"><span class=\"muted\">订单号</span><span>" + o.orderNo + "</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">下单入口</span><span>" + ({ CART: "购物车结算", BUY_NOW: "立即购买", SECKILL: "秒杀活动" }[o.source]) + "</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">下单时间</span><span>" + o.createdAt + "</span></div>"
-  + (o.payTime ? "<div class=\"amount-row\"><span class=\"muted\">支付时间</span><span>" + o.payTime + "</span></div>" : "")
-  + (o.shipTime ? "<div class=\"amount-row\"><span class=\"muted\">发货时间</span><span>" + o.shipTime + "</span></div>" : "")
-  + (o.autoReceiveAt ? "<div class=\"amount-row\"><span class=\"muted\">自动确认收货</span><span>" + o.autoReceiveAt + "</span></div>" : "") + "</div></div>"
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">商品明细</h3>"
+    + o.items.map(function (item) {
+        return "<div class=\"order-line\"><img src=\"" + img(item.productImage, "headphone-01") + "\" alt=\"\">"
+          + "<div class=\"grow\"><a href=\"product.html?id=" + item.productId + "\" class=\"clamp2\" style=\"font-weight:500\">" + esc(item.productName) + "</a>"
+          + "<div class=\"small faint mt8\">" + esc(item.skuName || "默认规格") + "</div></div>"
+          + "<div style=\"text-align:right\" class=\"small muted\">" + yuanPlain(item.unitPrice) + "<br>x" + item.quantity + "</div>"
+          + "<div style=\"width:100px;text-align:right\" class=\"price\">" + yuan(item.totalAmount) + "</div></div>";
+      }).join("")
+    + "<div class=\"mt12\"><div class=\"amount-row\"><span class=\"muted\">商品金额</span><span>" + yuanPlain(o.totalAmount) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">运费</span><span>" + yuanPlain(o.freightAmount) + " <span class=\"tag tag-brand\">全场包邮</span></span></div>"
+    + "<div class=\"amount-row total\"><span class=\"strong\">实付金额</span><span class=\"price\">" + yuan(o.payAmount) + "</span></div></div></div>"
 
-  + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单状态流转</h3><ul class=\"timeline mt12\">"
-  + log().map(function (r) { return "<li class=\"done\"><div class=\"strong\">" + r.s + "</div><div class=\"small muted\">" + r.d + "</div><div class=\"small faint\">" + r.t + "</div></li>"; }).join("")
-  + "</ul></div>";
-mountIcons(document);
-if (pending) countdown(document.getElementById("cd"), deadline(o));
-document.querySelectorAll("[data-cancel]").forEach(function (b) {
-  b.onclick = function () {
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单信息</h3>"
+    + "<div class=\"mt12\"><div class=\"amount-row\"><span class=\"muted\">订单号</span><span>" + esc(o.orderNo) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">下单入口</span><span>" + esc(Store.sourceText(o.source)) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">下单时间</span><span>" + formatTime(o.createdAt) + "</span></div>"
+    + (o.payTime ? "<div class=\"amount-row\"><span class=\"muted\">支付时间</span><span>" + formatTime(o.payTime) + "</span></div>" : "")
+    + (o.shipTime ? "<div class=\"amount-row\"><span class=\"muted\">发货时间</span><span>" + formatTime(o.shipTime) + "</span></div>" : "")
+    + (o.receiveTime ? "<div class=\"amount-row\"><span class=\"muted\">收货时间</span><span>" + formatTime(o.receiveTime) + "</span></div>" : "")
+    + (o.cancelTime ? "<div class=\"amount-row\"><span class=\"muted\">取消时间</span><span>" + formatTime(o.cancelTime) + "</span></div>" : "")
+    + (o.cancelReason ? "<div class=\"amount-row\"><span class=\"muted\">取消原因</span><span>" + esc(o.cancelReason) + "</span></div>" : "")
+    + (o.remark ? "<div class=\"amount-row\"><span class=\"muted\">订单备注</span><span>" + esc(o.remark) + "</span></div>" : "")
+    + "</div></div>"
+
+    + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单状态流转</h3><ul class=\"timeline mt12\">" + timeline(o) + "</ul></div>";
+  mountIcons(box);
+  if (pending && o.timeoutAt) countdown(document.getElementById("cd"), o.timeoutAt);
+
+  var cancel = box.querySelector("[data-cancel]");
+  if (cancel) cancel.onclick = function () {
     openModal("<p>取消后订单将关闭并释放已锁定库存，确定取消吗？</p>", { title: "取消订单",
       footer: "<button class=\"btn\" data-close>再想想</button><button class=\"btn btn-price\" id=\"ok\">确定取消</button>" });
     document.getElementById("ok").onclick = function () {
-      o.status = "CANCELLED"; o.cancelTime = "刚刚"; o.cancelReason = "用户主动取消"; closeModal(); toast("订单已取消", "ok"); location.reload();
+      closeModal();
+      Api.put("/v1/orders/" + encodeURIComponent(o.orderNo) + "/cancel").then(function () { toast("订单已取消", "ok"); load(); }, showError);
     };
   };
-});
-document.querySelectorAll("[data-receive]").forEach(function (b) {
-  b.onclick = function () {
+  var receive = box.querySelector("[data-receive]");
+  if (receive) receive.onclick = function () {
     openModal("<p>确认已收到商品？确认后订单完成且不可撤销。</p>", { title: "确认收货",
       footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认收货</button>" });
-    document.getElementById("ok").onclick = function () { o.status = "COMPLETED"; o.receiveTime = "刚刚"; closeModal(); toast("确认收货成功", "ok"); location.reload(); };
+    document.getElementById("ok").onclick = function () {
+      closeModal();
+      Api.put("/v1/orders/" + encodeURIComponent(o.orderNo) + "/receive").then(function () { toast("确认收货成功", "ok"); load(); }, showError);
+    };
   };
-});
-document.querySelectorAll("[data-remind]").forEach(function (b) { b.onclick = function () { toast("已提醒商家尽快发货", "ok"); }; });
-document.querySelectorAll("[data-again]").forEach(function (b) { b.onclick = function () { toast("已加入购物车", "ok"); }; });
-document.querySelectorAll("[data-delorder]").forEach(function (b) { b.onclick = function () { toast("订单已删除", "ok"); }; });
+  var remind = box.querySelector("[data-remind]");
+  if (remind) remind.onclick = function () { toast("已提醒商家尽快发货", "ok"); };
+  var again = box.querySelector("[data-again]");
+  if (again) again.onclick = function () { buyAgain(o, again); };
+}
+
+function buyAgain(o, button) {
+  button.disabled = true;
+  var chain = Promise.resolve();
+  o.items.forEach(function (item) {
+    chain = chain.then(function () { return Api.post("/v1/carts/items", { skuId: item.skuId, quantity: item.quantity }); });
+  });
+  chain.then(function () {
+    toast("已加入购物车", "ok");
+    window.Store.refreshCartCount().then(function () { window.repaintHeader("orders"); });
+  }, showError).then(function () { button.disabled = false; });
+}
+
+function load() {
+  Api.get("/v1/orders/" + encodeURIComponent(orderNo)).then(function (data) {
+    order = data;
+    render();
+  }, showError);
+}
+
+if (requireLogin() && orderNo) load(); else render();
 </script>
 </body>
 </html>

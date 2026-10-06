@@ -10,93 +10,210 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inventory" })) {
+if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inventory:read" })) {
+  var canWrite = hasPerm("inventory:write");
   var tab = "stock";
+  var page = 1, SIZE = 10, total = 0;
+  var skuFilter = qs("skuId", "");
+  var onlyAlert = false;
+  var productCache = {};   // productId -> 名称 / 主图；后端没有批量查询，按行懒加载
+
+  function productOf(id, done) {
+    if (productCache[id]) { done(productCache[id]); return; }
+    Api.get("/v1/admin/products/" + id, { silent: true }).then(function (p) {
+      productCache[id] = p;
+      done(p);
+    }, function () { done(null); });
+  }
+
   function render() {
-    var box = document.getElementById("body");
-    if (tab === "stock") {
-      box.innerHTML = "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th>SKU 编码</th><th class=\"num\">可售</th><th class=\"num\">锁定</th><th class=\"num\">预警阈值</th><th>更新时间</th><th>操作</th></tr></thead><tbody>"
-        + ADMIN_DB.inventory.map(function (r) {
-            var low = r.available <= r.warnThreshold;
-            return "<tr><td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(r.image) + "\" alt=\"\"><span>" + r.name + "</span></div></td>"
-              + "<td class=\"small muted\">" + r.skuCode + "</td>"
+    var body = document.getElementById("body");
+    document.getElementById("pager").innerHTML = "";
+    if (tab === "stock") renderStock(body);
+    else if (tab === "flow") renderFlows(body);
+    else renderAlerts(body);
+  }
+
+  function renderStock(body) {
+    var query = "page=" + page + "&size=" + SIZE;
+    if (skuFilter) query += "&skuId=" + encodeURIComponent(skuFilter);
+    if (onlyAlert) query += "&onlyAlert=true";
+    Api.get("/v1/admin/inventory?" + query).then(function (data) {
+      total = data.total || 0;
+      var list = data.list || [];
+      body.innerHTML = "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">SKU ID</th><th class=\"num\">可售</th><th class=\"num\">锁定</th><th class=\"num\">预警阈值</th><th>更新时间</th><th>操作</th></tr></thead><tbody>"
+        + (list.length ? list.map(function (r) {
+            var low = r.alerting || r.available <= r.warnThreshold;
+            return "<tr><td class=\"pname\" data-pid=\"" + (r.productId || "") + "\"><span class=\"small faint\">商品 " + (r.productId || "—") + "</span></td>"
+              + "<td class=\"num small muted\">" + r.skuId + "</td>"
               + "<td class=\"num\"" + (low ? " style=\"color:var(--price);font-weight:600\"" : "") + ">" + r.available + "</td>"
               + "<td class=\"num\">" + r.locked + "</td><td class=\"num\">" + r.warnThreshold + "</td>"
-              + "<td class=\"small muted\">" + r.updatedAt + "</td>"
-              + "<td><button class=\"btn btn-sm\" data-adj=\"" + r.productId + "\">调整库存</button></td></tr>";
+              + "<td class=\"small muted\">" + formatTime(r.updatedAt) + "</td>"
+              + "<td>" + (canWrite ? "<button class=\"btn btn-sm\" data-adj=\"" + r.skuId + "\" data-pid=\"" + (r.productId || "") + "\">调整库存</button>" : "<span class=\"small faint\">只读</span>") + "</td></tr>";
           }).join("")
+          : "<tr><td colspan=\"7\"><div class=\"empty\"><i data-icon=\"boxes\" data-size=\"30\"></i><h4>没有库存记录</h4></div></td></tr>")
         + "</tbody></table></div>";
-    } else if (tab === "flow") {
-      box.innerHTML = "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>时间</th><th>SKU</th><th>商品</th><th>类型</th><th class=\"num\">数量</th><th class=\"num\">变更前</th><th class=\"num\">变更后</th><th>原因</th><th>操作人</th></tr></thead><tbody>"
-        + ADMIN_DB.flows.map(function (f) {
-            var cls = f.type === "ADJUST" ? "tag-brand" : f.type === "ALLOCATE" ? "tag-price" : "tag";
-            return "<tr><td class=\"small muted\">" + f.at + "</td><td class=\"small\">" + f.skuCode + "</td><td>" + f.name + "</td>"
-              + "<td><span class=\"tag " + cls + "\">" + flowTypeText(f.type) + "</span></td>"
-              + "<td class=\"num\">" + f.quantity + "</td><td class=\"num muted\">" + f.before + "</td><td class=\"num strong\">" + f.after + "</td>"
-              + "<td>" + f.reason + "</td><td>" + f.operator + "</td></tr>";
-          }).join("")
-        + "</tbody></table></div>";
-    } else {
-      var open = ADMIN_DB.alerts.filter(function (a) { return a.status === "OPEN"; });
-      box.innerHTML = open.length
-        ? "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th><th>操作</th></tr></thead><tbody>"
-          + open.map(function (a) {
-              return "<tr><td>" + a.name + "</td><td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.current + "</td>"
-                + "<td class=\"num\">" + a.threshold + "</td><td>" + a.at + "</td><td><span class=\"pill pill-pay\">待处理</span></td>"
-                + "<td><div class=\"table-actions\"><button class=\"btn btn-sm\" data-adj=\"" + a.productId + "\">补货</button>"
-                + "<button class=\"btn btn-sm\" data-closealert=\"" + a.productId + "\">关闭预警</button></div></td></tr>";
-            }).join("") + "</tbody></table></div>"
-        : "<div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"34\"></i><h4>暂无库存预警</h4></div>";
-    }
-    box.querySelectorAll("[data-adj]").forEach(function (b) { b.onclick = function () { adjust(Number(b.dataset.adj)); }; });
-    box.querySelectorAll("[data-closealert]").forEach(function (b) {
-      b.onclick = function () {
-        var id = Number(b.dataset.closealert);
-        ADMIN_DB.alerts.forEach(function (a) { if (a.productId === id) a.status = "CLOSED"; });
-        toast("预警已关闭", "ok"); render();
-      };
+      mountIcons(body);
+      fillNames(body);
+      bindAdjust(body);
+      renderPager();
+    }, showError);
+  }
+
+  /** 用商品详情补齐名称（每页最多 10 行，带缓存） */
+  function fillNames(body) {
+    body.querySelectorAll(".pname").forEach(function (cell) {
+      var id = Number(cell.dataset.pid);
+      if (!id) { cell.textContent = "—"; return; }
+      productOf(id, function (p) {
+        if (!p) { cell.textContent = "商品 " + id; return; }
+        cell.innerHTML = "<div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.mainImage, "tee-01") + "\" alt=\"\">"
+          + "<span><a href=\"product-edit.html?id=" + p.id + "\">" + esc(p.name) + "</a><br><span class=\"small faint\">" + esc(p.categoryName || "") + "</span></span></div>";
+        mountIcons(cell);
+      });
     });
   }
 
-  function adjust(productId) {
-    var r = ADMIN_DB.inventory.filter(function (x) { return x.productId === productId; })[0];
-    openModal("<dl class=\"dl\"><dt>商品</dt><dd>" + r.name + "</dd><dt>SKU</dt><dd>" + r.skuCode + "</dd>"
-      + "<dt>当前可售</dt><dd>" + r.available + "</dd></dl>"
+  function renderFlows(body) {
+    var query = "page=" + page + "&size=" + SIZE;
+    if (skuFilter) query += "&skuId=" + encodeURIComponent(skuFilter);
+    Api.get("/v1/admin/inventory/flows?" + query).then(function (data) {
+      total = data.total || 0;
+      var list = data.list || [];
+      body.innerHTML = "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>时间</th><th class=\"num\">SKU ID</th><th>类型</th><th class=\"num\">数量</th><th class=\"num\">可售 前→后</th><th class=\"num\">锁定 前→后</th><th>原因</th><th>操作人</th></tr></thead><tbody>"
+        + (list.length ? list.map(function (f) {
+            var cls = f.type === "ADJUST" ? "tag-brand" : f.type === "ALLOCATE" ? "tag-price" : "tag";
+            return "<tr><td class=\"small muted\">" + formatTime(f.createdAt) + "</td><td class=\"num small\">" + f.skuId + "</td>"
+              + "<td><span class=\"tag " + cls + "\">" + esc(flowTypeText(f.type)) + "</span></td>"
+              + "<td class=\"num\">" + f.quantity + "</td>"
+              + "<td class=\"num\"><span class=\"muted\">" + f.beforeAvailable + "</span> → <span class=\"strong\">" + f.afterAvailable + "</span></td>"
+              + "<td class=\"num\"><span class=\"muted\">" + f.beforeLocked + "</span> → <span class=\"strong\">" + f.afterLocked + "</span></td>"
+              + "<td>" + esc(f.reason || "—") + "</td><td class=\"small muted\">" + esc(f.operatorType || "") + (f.operatorId ? " #" + f.operatorId : "") + "</td></tr>";
+          }).join("")
+          : "<tr><td colspan=\"8\"><div class=\"empty\"><i data-icon=\"list\" data-size=\"30\"></i><h4>暂无库存流水</h4></div></td></tr>")
+        + "</tbody></table></div>";
+      mountIcons(body);
+      renderPager();
+    }, showError);
+  }
+
+  function renderAlerts(body) {
+    Api.get("/v1/admin/inventory/alerts" + (onlyAlert ? "?status=OPEN" : "")).then(function (list) {
+      list = list || [];
+      total = 0;
+      body.innerHTML = list.length
+        ? "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">SKU ID</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th><th>操作</th></tr></thead><tbody>"
+          + list.map(function (a) {
+              return "<tr><td class=\"pname\" data-pid=\"" + (a.productId || "") + "\"><span class=\"small faint\">商品 " + (a.productId || "—") + "</span></td>"
+                + "<td class=\"num small muted\">" + a.skuId + "</td>"
+                + "<td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.currentStock + "</td>"
+                + "<td class=\"num\">" + a.threshold + "</td><td class=\"small muted\">" + formatTime(a.updatedAt) + "</td>"
+                + "<td>" + (a.status === "OPEN" ? "<span class=\"pill pill-pay\">待处理</span>" : "<span class=\"pill pill-muted\">已关闭</span>") + "</td>"
+                + "<td><div class=\"table-actions\">"
+                + (canWrite ? "<button class=\"btn btn-sm\" data-adj=\"" + a.skuId + "\" data-pid=\"" + (a.productId || "") + "\">补货</button>" : "")
+                + (canWrite && a.status === "OPEN" ? "<button class=\"btn btn-sm\" data-closealert=\"" + a.id + "\">关闭预警</button>" : "")
+                + "</div></td></tr>";
+            }).join("") + "</tbody></table></div>"
+        : "<div class=\"empty\"><i data-icon=\"circle-check\" data-size=\"34\"></i><h4>暂无库存预警</h4></div>";
+      mountIcons(body);
+      fillNames(body);
+      bindAdjust(body);
+      body.querySelectorAll("[data-closealert]").forEach(function (b) {
+        b.onclick = function () {
+          Api.put("/v1/admin/inventory/alerts/" + b.dataset.closealert + "/close")
+            .then(function () { toast("预警已关闭", "ok"); render(); }, showError);
+        };
+      });
+    }, showError);
+  }
+
+  function bindAdjust(body) {
+    body.querySelectorAll("[data-adj]").forEach(function (b) {
+      b.onclick = function () { adjust(Number(b.dataset.adj), b.dataset.pid ? Number(b.dataset.pid) : null); };
+    });
+  }
+
+  function adjust(skuId, productId) {
+    if (!canWrite) { toast("当前角色无库存管理权限（接口返回 403）", "err"); return; }
+    openModal("<dl class=\"dl\"><dt>SKU ID</dt><dd>" + skuId + "</dd>" + (productId ? "<dt>商品 ID</dt><dd>" + productId + "</dd>" : "")
+      + "</dl>"
       + "<div class=\"field mt12\"><label>调整数量</label><input class=\"input\" id=\"delta\" placeholder=\"正数补货，负数减少\"></div>"
       + "<div class=\"field\"><label>调整原因</label><input class=\"input\" id=\"reason\" placeholder=\"如：到货补货 / 盘点修正\"></div>"
       + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>每次调整都会写入库存流水，记录变更前后值、原因与操作人（REQ-501）。</div>",
       { title: "调整库存", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认调整</button>" });
     document.getElementById("ok").onclick = function () {
-      var d = Number(document.getElementById("delta").value);
+      var delta = Number(document.getElementById("delta").value);
       var reason = document.getElementById("reason").value.trim();
-      if (!d) { toast("调整数量不能为 0（40003）", "err"); return; }
+      if (!delta) { toast("调整数量不能为 0（40003）", "err"); return; }
       if (!reason) { toast("请填写调整原因", "err"); return; }
-      if (r.available + d < 0) { toast("调整后库存不能为负（40003）", "err"); return; }
-      var before = r.available;
-      r.available += d; r.updatedAt = new Date().toLocaleString("zh-CN", { hour12: false });
-      ADMIN_DB.flows.unshift({ id: Date.now(), skuCode: r.skuCode, name: r.name, type: "ADJUST", quantity: Math.abs(d),
-        before: before, after: r.available, reason: reason, operator: roleName() + " · " + DB.user.nickname, at: r.updatedAt });
-      closeModal(); toast("库存已调整并生成流水", "ok"); render();
+      var url = "/v1/admin/inventory/" + skuId + "/adjust" + (productId ? "?productId=" + productId : "");
+      Api.put(url, { delta: delta, reason: reason }).then(function () {
+        closeModal();
+        toast("库存已调整并生成流水", "ok");
+        render();
+      }, showError);
     };
+  }
+
+  function renderPager() {
+    var pages = Math.max(1, Math.ceil(total / SIZE));
+    var el = document.getElementById("pager");
+    if (pages <= 1) { el.innerHTML = ""; return; }
+    el.innerHTML = "<button " + (page === 1 ? "disabled" : "") + " data-p=\"" + (page - 1) + "\">上一页</button>"
+      + "<span class=\"small muted\">第 " + page + " / " + pages + " 页（共 " + total + " 条）</span>"
+      + "<button " + (page === pages ? "disabled" : "") + " data-p=\"" + (page + 1) + "\">下一页</button>";
+    el.querySelectorAll("[data-p]").forEach(function (b) {
+      b.onclick = function () { page = Number(b.dataset.p); render(); };
+    });
   }
 
   document.getElementById("content").innerHTML =
     "<div class=\"panel\"><div class=\"panel-head\"><div class=\"tabs\" id=\"tabs\" style=\"border:0\">"
     + "<button data-v=\"stock\" class=\"on\">库存列表</button><button data-v=\"flow\">库存流水</button><button data-v=\"alert\">库存预警</button></div>"
     + "<span class=\"small faint\">库存权威在 inventory-service，秒杀池库存单独划拨</span></div>"
-    + "<div class=\"panel-body flush\" id=\"body\"></div></div>";
+    + "<div class=\"panel-body\"><div class=\"toolbar\">"
+    + "<input class=\"input\" id=\"sku\" placeholder=\"按 SKU ID 精确筛选\" value=\"" + esc(skuFilter) + "\">"
+    + "<button class=\"btn\" id=\"search\"><i data-icon=\"search\" data-size=\"15\"></i>查询</button>"
+    + "<button class=\"btn btn-ghost\" id=\"reset\">重置</button>"
+    + "<label class=\"check\"><input type=\"checkbox\" id=\"onlyAlert\" " + (onlyAlert ? "checked" : "") + "><span>只看预警</span></label>"
+    + "<span class=\"spacer\"></span><span class=\"small faint\">当前角色：" + roleName() + (canWrite ? " · 可调整库存" : " · 仅可查看") + "</span></div>"
+    + "<div class=\"flush\" id=\"body\"></div><div class=\"pagination\" id=\"pager\"></div></div></div>";
+
   document.querySelectorAll("#tabs button").forEach(function (b) {
     b.onclick = function () {
       document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
-      b.classList.add("on"); tab = b.dataset.v; render();
+      b.classList.add("on");
+      tab = b.dataset.v;
+      page = 1;
+      render();
     };
   });
-  render();
+  document.getElementById("search").onclick = function () {
+    skuFilter = document.getElementById("sku").value.trim();
+    page = 1;
+    render();
+  };
+  document.getElementById("reset").onclick = function () {
+    skuFilter = "";
+    onlyAlert = false;
+    page = 1;
+    document.getElementById("sku").value = "";
+    document.getElementById("onlyAlert").checked = false;
+    render();
+  };
+  document.getElementById("onlyAlert").onchange = function () {
+    onlyAlert = this.checked;
+    page = 1;
+    render();
+  };
   mountIcons(document.getElementById("content"));
+  render();
 }
 </script>
 </body>

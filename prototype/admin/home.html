@@ -10,77 +10,205 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("home", { title: "首页配置", crumb: "运营", perm: "home" })) {
+if (adminShell("home", { title: "首页配置", crumb: "运营", perm: "home:read" })) {
+  var canWrite = hasPerm("home:write");
   var tab = "banner";
+  var categories = [];
+  var state = { banner: [], notice: [], nav: [], floor: [] };
   var SORT_FIELDS = [["sales", "按销量"], ["new", "按上新"], ["price_asc", "价格升序"], ["price_desc", "价格降序"]];
+  var LINK_TYPES = [[0, "无跳转"], [1, "商品"], [2, "分类"], [3, "外链"]];
+  var dirty = {};    // 每个页签独立的未保存标记：切页签时先保存，避免改了一半就丢
 
-  function move(arr, i, d) {
-    var j = i + d;
-    if (j < 0 || j >= arr.length) return;
-    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  function catName(id) {
+    var hit = categories.filter(function (c) { return c.id === Number(id); })[0];
+    return hit ? hit.name : ("分类 " + id);
+  }
+
+  function list() { return state[tab]; }
+  function endpoint() {
+    return { banner: "banners", notice: "notices", nav: "navs", floor: "floors" }[tab];
+  }
+
+  function load() {
+    Api.get("/v1/admin/home/" + endpoint()).then(function (data) {
+      state[tab] = data || [];
+      render();
+    }, showError);
   }
 
   function render() {
     var box = document.getElementById("body");
-    if (tab === "banner") {
-      box.innerHTML = "<div class=\"rows\">" + DB.home.banners.map(function (b, i) {
-        return rowItem(i, DB.home.banners.length, img(b.image), "<div><div class=\"strong\">" + b.title + "</div>"
-          + "<div class=\"small faint\">" + b.subtitle + " · 跳转分类 " + b.linkValue + "</div></div>");
-      }).join("") + "</div>";
-    } else if (tab === "notice") {
-      box.innerHTML = "<div class=\"rows\">" + DB.home.notices.map(function (n, i) {
-        return rowItem(i, DB.home.notices.length, null, "<div class=\"strong\">" + n.content + "</div>");
-      }).join("") + "</div>";
-    } else if (tab === "nav") {
-      box.innerHTML = "<div class=\"rows\">" + DB.home.navs.map(function (n, i) {
-        return rowItem(i, DB.home.navs.length, null, "<div class=\"row g8\"><i data-icon=\"" + n.icon + "\" data-size=\"16\"></i>"
-          + "<div><div class=\"strong\">" + n.name + "</div><div class=\"small faint\">" + (n.href ? "跳转 " + n.href : "跳转分类 " + n.categoryId) + "</div></div></div>");
-      }).join("") + "</div>";
-    } else {
-      box.innerHTML = "<div class=\"rows\">" + DB.home.floors.map(function (f, i) {
-        var sel = "<select class=\"select\" data-sort=\"" + i + "\" style=\"width:auto\">"
-          + SORT_FIELDS.map(function (s) { return "<option value=\"" + s[0] + "\"" + (f.sortField === s[0] ? " selected" : "") + ">" + s[1] + "</option>"; }).join("") + "</select>";
-        return rowItem(i, DB.home.floors.length, null, "<div class=\"row g12 wrap\"><div><div class=\"strong\">" + f.title + "</div>"
-          + "<div class=\"small faint\">分类：" + (catById(f.categoryId) || {}).name + " · 取 " + f.limit + " 个商品</div></div>"
-          + "<span class=\"small faint\">排序维度</span>" + sel + "</div>");
-      }).join("") + "</div>"
-        + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>每个楼层可单独配置排序维度，前台按该维度自动拉取该分类下的商品（REQ-402、R5-Q6）。</div>";
+    var rows = list();
+    if (!rows.length) {
+      box.innerHTML = "<div class=\"empty\"><i data-icon=\"layout-grid\" data-size=\"32\"></i><h4>该配置项还没有内容</h4><p class=\"small\">点击右上角「新增」添加一条</p></div>";
+      mountIcons(box);
+      bind();
+      return;
     }
+    box.innerHTML = "<div class=\"rows\">" + rows.map(function (row, index) {
+      var inner = "";
+      var image = null;
+      if (tab === "banner") {
+        image = img(row.imageUrl, "banner-0" + (index % 3 + 1));
+        var link = LINK_TYPES.filter(function (t) { return t[0] === Number(row.linkType || 0); })[0];
+        inner = "<div><div class=\"strong\">" + esc(row.title || "（无标题）") + "</div>"
+          + "<div class=\"small faint\">" + (link ? link[1] : "无跳转") + (row.linkValue ? " · " + esc(row.linkValue) : "") + "</div></div>";
+      } else if (tab === "notice") {
+        inner = "<div class=\"strong\">" + esc(row.content) + "</div>";
+      } else if (tab === "nav") {
+        inner = "<div class=\"row g8\"><i data-icon=\"" + (row.icon || "layout-grid") + "\" data-size=\"16\"></i>"
+          + "<div><div class=\"strong\">" + esc(row.name) + "</div><div class=\"small faint\">跳转 " + esc(catName(row.categoryId)) + "</div></div></div>";
+      } else {
+        inner = "<div class=\"row g12 wrap\"><div><div class=\"strong\">" + esc(row.title) + "</div>"
+          + "<div class=\"small faint\">分类：" + esc(catName(row.categoryId)) + " · 取 " + (row.limitSize || 8) + " 个商品"
+          + ((row.pinnedProductIds || []).length ? " · 置顶 " + row.pinnedProductIds.join("/") : "") + "</div></div>"
+          + "<span class=\"small faint\">排序维度</span><span class=\"tag\">" + sortLabel(row.sortField || "sales") + "</span></div>";
+      }
+      return "<div class=\"rowitem\">"
+        + "<span class=\"drag\"><i data-icon=\"menu\" data-size=\"16\"></i></span>"
+        + (image ? "<img src=\"" + image + "\" alt=\"\">" : "<span></span>")
+        + inner
+        + "<div class=\"inline\">" + (canWrite
+            ? "<button class=\"btn btn-sm\" data-up=\"" + index + "\" " + (index === 0 ? "disabled" : "") + ">↑</button>"
+              + "<button class=\"btn btn-sm\" data-down=\"" + index + "\" " + (index === rows.length - 1 ? "disabled" : "") + ">↓</button>"
+              + "<button class=\"btn btn-sm\" data-editrow=\"" + index + "\">编辑</button>"
+              + "<button class=\"btn btn-sm\" data-delrow=\"" + index + "\">删除</button>"
+            : "<span class=\"small faint\">只读</span>")
+        + "</div></div>";
+    }).join("") + "</div>"
+      + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>"
+      + (tab === "floor" ? "每个楼层可单独配置排序维度，前台按该维度自动拉取该分类下的商品（REQ-402）。" : "修改后点击右上角「保存配置」提交，后端会主动失效首页缓存（REQ-401）。")
+      + "</div>";
+    mountIcons(box);
     bind();
   }
 
-  function rowItem(i, len, image, inner) {
-    return "<div class=\"rowitem\">"
-      + "<span class=\"drag\"><i data-icon=\"menu\" data-size=\"16\"></i></span>"
-      + (image ? "<img src=\"" + image + "\" alt=\"\">" : "<span></span>")
-      + inner
-      + "<div class=\"inline\"><label class=\"switch\"><input type=\"checkbox\" checked><span></span></label>"
-      + "<span class=\"ord\"><button data-up=\"" + i + "\" " + (i === 0 ? "disabled" : "") + ">↑</button>"
-      + "<button data-down=\"" + i + "\" " + (i === len - 1 ? "disabled" : "") + ">↓</button></span>"
-      + "<button class=\"btn btn-sm\" data-editrow=\"" + i + "\">编辑</button>"
-      + "<button class=\"btn btn-sm\" data-delrow=\"" + i + "\">删除</button></div></div>";
-  }
-
-  function list() {
-    return tab === "banner" ? DB.home.banners : tab === "notice" ? DB.home.notices
-      : tab === "nav" ? DB.home.navs : DB.home.floors;
+  function move(index, delta) {
+    var rows = list();
+    var target = index + delta;
+    if (target < 0 || target >= rows.length) return;
+    var tmp = rows[index];
+    rows[index] = rows[target];
+    rows[target] = tmp;
+    dirty[tab] = true;
+    render();
   }
 
   function bind() {
-    var arr = list();
-    document.querySelectorAll("[data-up]").forEach(function (b) { b.onclick = function () { move(arr, Number(b.dataset.up), -1); render(); toast("排序已更新"); }; });
-    document.querySelectorAll("[data-down]").forEach(function (b) { b.onclick = function () { move(arr, Number(b.dataset.down), 1); render(); toast("排序已更新"); }; });
-    document.querySelectorAll("[data-delrow]").forEach(function (b) { b.onclick = function () { arr.splice(Number(b.dataset.delrow), 1); render(); toast("已删除", "ok"); }; });
-    document.querySelectorAll("[data-editrow]").forEach(function (b) { b.onclick = function () { toast("编辑配置项：正式实现弹窗表单"); }; });
-    document.querySelectorAll("[data-sort]").forEach(function (s) {
-      s.onchange = function () {
-        DB.home.floors[Number(s.dataset.sort)].sortField = s.value;
-        toast("楼层排序维度已改为" + s.options[s.selectedIndex].text);
-      };
+    document.querySelectorAll("[data-up]").forEach(function (b) { b.onclick = function () { move(Number(b.dataset.up), -1); }; });
+    document.querySelectorAll("[data-down]").forEach(function (b) { b.onclick = function () { move(Number(b.dataset.down), 1); }; });
+    document.querySelectorAll("[data-delrow]").forEach(function (b) {
+      b.onclick = function () { list().splice(Number(b.dataset.delrow), 1); dirty[tab] = true; render(); toast("已删除，别忘了保存"); };
+    });
+    document.querySelectorAll("[data-editrow]").forEach(function (b) {
+      b.onclick = function () { edit(list()[Number(b.dataset.editrow)]); };
+    });
+    var save = document.getElementById("save");
+    if (save) {
+      save.onclick = function () { saveAll(tab); };
+      save.textContent = dirty[tab] ? "保存配置 ●" : "保存配置";
+    }
+    var add = document.getElementById("addRow");
+    if (add) add.onclick = function () { edit(null); };
+  }
+
+  function edit(row) {
+    var isEdit = !!row;
+    var body = "";
+    if (tab === "banner") {
+      body = "<div class=\"field\"><label>标题</label><input class=\"input\" id=\"e-title\" value=\"" + esc(isEdit ? (row.title || "") : "") + "\"></div>"
+        + "<div class=\"field\"><label>图片 URL</label><input class=\"input\" id=\"e-image\" value=\"" + esc(isEdit ? row.imageUrl : "") + "\" placeholder=\"https://minio/baiyishop/banner.jpg\">"
+        + "<div class=\"hint\">本地联调可填 banner-01 / banner-02 / banner-03 使用占位图</div></div>"
+        + "<div class=\"field\"><label>跳转类型</label><select class=\"select\" id=\"e-linktype\">"
+        + LINK_TYPES.map(function (t) { return "<option value=\"" + t[0] + "\"" + (isEdit && Number(row.linkType || 0) === t[0] ? " selected" : "") + ">" + t[1] + "</option>"; }).join("")
+        + "</select></div>"
+        + "<div class=\"field\"><label>跳转值</label><input class=\"input\" id=\"e-linkvalue\" value=\"" + esc(isEdit ? (row.linkValue || "") : "") + "\" placeholder=\"商品 ID / 分类 ID / 链接\"></div>";
+    } else if (tab === "notice") {
+      body = "<div class=\"field\"><label>公告内容</label><textarea class=\"textarea\" id=\"e-content\" rows=\"3\" maxlength=\"500\">" + esc(isEdit ? row.content : "") + "</textarea></div>";
+    } else if (tab === "nav") {
+      body = "<div class=\"field\"><label>入口名称</label><input class=\"input\" id=\"e-name\" value=\"" + esc(isEdit ? row.name : "") + "\"></div>"
+        + "<div class=\"field\"><label>图标标识</label><input class=\"input\" id=\"e-icon\" value=\"" + esc(isEdit ? (row.icon || "") : "") + "\" placeholder=\"如 headphone / laptop\"></div>"
+        + "<div class=\"field\"><label>跳转分类</label><select class=\"select\" id=\"e-cat\">"
+        + categories.map(function (c) { return "<option value=\"" + c.id + "\"" + (isEdit && row.categoryId === c.id ? " selected" : "") + ">" + esc(c.name) + "</option>"; }).join("")
+        + "</select></div>";
+    } else {
+      body = "<div class=\"field\"><label>楼层标题</label><input class=\"input\" id=\"e-title\" value=\"" + esc(isEdit ? row.title : "") + "\"></div>"
+        + "<div class=\"field\"><label>绑定分类</label><select class=\"select\" id=\"e-cat\">"
+        + categories.map(function (c) { return "<option value=\"" + c.id + "\"" + (isEdit && row.categoryId === c.id ? " selected" : "") + ">" + esc(c.name) + "</option>"; }).join("")
+        + "</select></div>"
+        + "<div class=\"field\"><label>排序维度</label><select class=\"select\" id=\"e-sortfield\">"
+        + SORT_FIELDS.map(function (s) { return "<option value=\"" + s[0] + "\"" + (isEdit && row.sortField === s[0] ? " selected" : "") + ">" + s[1] + "</option>"; }).join("")
+        + "</select></div>"
+        + "<div class=\"field\"><label>展示数量</label><input class=\"input\" id=\"e-limit\" value=\"" + (isEdit ? (row.limitSize || 8) : 8) + "\"></div>"
+        + "<div class=\"field\"><label>置顶商品 ID</label><input class=\"input\" id=\"e-pinned\" value=\"" + esc(isEdit ? (row.pinnedProductIds || []).join(",") : "") + "\" placeholder=\"选填，多个用英文逗号分隔\"></div>";
+    }
+    openModal("<div class=\"field\"><label>是否启用</label><label class=\"check\"><input type=\"checkbox\" id=\"e-enabled\" "
+      + (!isEdit || row.enabled !== false ? "checked" : "") + "><span>前台展示</span></label></div>" + body,
+      { title: isEdit ? "编辑配置" : "新增配置", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确定</button>" });
+    document.getElementById("ok").onclick = function () {
+      var enabled = document.getElementById("e-enabled").checked;
+      var next = { enabled: enabled };
+      if (tab === "banner") {
+        next.title = document.getElementById("e-title").value.trim();
+        next.imageUrl = document.getElementById("e-image").value.trim();
+        next.linkType = Number(document.getElementById("e-linktype").value);
+        next.linkValue = document.getElementById("e-linkvalue").value.trim();
+        if (!next.imageUrl) { toast("请填写图片地址", "err"); return; }
+      } else if (tab === "notice") {
+        next.content = document.getElementById("e-content").value.trim();
+        if (!next.content) { toast("请填写公告内容", "err"); return; }
+      } else if (tab === "nav") {
+        next.name = document.getElementById("e-name").value.trim();
+        next.icon = document.getElementById("e-icon").value.trim();
+        next.categoryId = Number(document.getElementById("e-cat").value || 0) || null;
+        if (!next.name) { toast("请填写入口名称", "err"); return; }
+      } else {
+        next.title = document.getElementById("e-title").value.trim();
+        next.categoryId = Number(document.getElementById("e-cat").value || 0) || null;
+        next.sortField = document.getElementById("e-sortfield").value;
+        next.limitSize = Number(document.getElementById("e-limit").value || 8);
+        next.pinnedProductIds = document.getElementById("e-pinned").value.split(",")
+          .map(function (s) { return Number(s.trim()); })
+          .filter(function (n) { return n > 0; });
+        if (!next.title) { toast("请填写楼层标题", "err"); return; }
+        if (!next.categoryId) { toast("请选择楼层绑定的分类", "err"); return; }
+      }
+      if (isEdit) {
+        Object.keys(next).forEach(function (k) { row[k] = next[k]; });
+      } else {
+        list().push(next);
+      }
+      dirty[tab] = true;
+      closeModal();
+      render();
+      toast("已修改，记得点「保存配置」提交", "ok");
+    };
+  }
+
+  /** 保存当前页签的整份配置；PUT 是全量覆盖，sort 按行顺序重排 */
+  function saveAll(tabName, after) {
+    state[tabName] = state[tabName] || [];
+    var previous = tab;
+    tab = tabName;
+    var rows = list().map(function (row, index) {
+      var copy = JSON.parse(JSON.stringify(row));
+      copy.sort = index + 1;
+      if (copy.enabled === undefined) copy.enabled = true;
+      return copy;
+    });
+    Api.put("/v1/admin/home/" + endpoint(), rows).then(function () {
+      dirty[tabName] = false;
+      toast("已保存，首页缓存已失效，前台刷新即生效", "ok");
+      if (after) { after(); } else { tab = previous; load(); }
+    }, function (error) {
+      tab = previous;
+      showError(error);
     });
   }
 
@@ -88,18 +216,36 @@ if (adminShell("home", { title: "首页配置", crumb: "运营", perm: "home" })
     "<div class=\"panel\"><div class=\"panel-head\"><div class=\"tabs\" id=\"tabs\" style=\"border:0\">"
     + "<button data-v=\"banner\" class=\"on\">轮播图</button><button data-v=\"notice\">公告</button>"
     + "<button data-v=\"nav\">金刚区</button><button data-v=\"floor\">楼层推荐位</button></div>"
-    + "<button class=\"btn btn-primary btn-sm\" id=\"addRow\"><i data-icon=\"plus\" data-size=\"14\"></i>新增</button></div>"
-    + "<div class=\"panel-body\" id=\"body\"></div></div>"
+    + (canWrite ? "<div class=\"inline\"><button class=\"btn btn-sm\" id=\"addRow\"><i data-icon=\"plus\" data-size=\"14\"></i>新增</button>"
+      + "<button class=\"btn btn-primary btn-sm\" id=\"save\">保存配置</button></div>" : "")
+    + "</div><div class=\"panel-body\" id=\"body\"></div></div>"
     + "<div class=\"alert alert-plain mt12\"><i data-icon=\"refresh-cw\" data-size=\"15\"></i>保存后主动失效首页缓存，前台刷新即生效，无需重启服务（REQ-401）。配置为空时前台正常展示空态。</div>";
+
   document.querySelectorAll("#tabs button").forEach(function (b) {
     b.onclick = function () {
-      document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
-      b.classList.add("on"); tab = b.dataset.v; render();
+      var next = b.dataset.v;
+      if (next === tab) return;
+      var go = function () {
+        document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
+        b.classList.add("on");
+        tab = next;
+        load();
+      };
+      if (dirty[tab]) {
+        saveAll(tab, go);   // 先落盘再切，避免未保存的改动被覆盖
+      } else {
+        go();
+      }
     };
   });
-  document.getElementById("addRow").onclick = function () { toast("新增配置项：正式实现弹窗表单"); };
-  render();
   mountIcons(document.getElementById("content"));
+
+  Api.get("/v1/admin/categories").then(function (tree) {
+    (function walk(nodes) {
+      (nodes || []).forEach(function (n) { categories.push({ id: n.id, name: n.name, level: n.level }); walk(n.children); });
+    })(tree || []);
+    load();
+  }, function () { load(); });
 }
 </script>
 </body>

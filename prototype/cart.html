@@ -14,95 +14,132 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
 document.getElementById("steps").innerHTML = stepbar(1);
-var cart = DB.cart;
+var cart = null;
 
-function calc() {
-  var items = cart.filter(function (c) { return c.checked && !c.invalid; });
-  var amount = sum(items.map(function (c) { return mul(P(c.productId).price, c.quantity); }));
-  var count = items.reduce(function (s, c) { return s + c.quantity; }, 0);
-  return { amount: amount, count: count, items: items };
+function syncHeader() {
+  window.Store.refreshCartCount().then(function () { window.repaintHeader("category"); });
 }
 
 function render() {
   var box = document.getElementById("cartBox");
-  if (!cart.length) {
+  if (!cart) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在加载购物车…</h4></div></div>";
+    mountIcons(box);
+    return;
+  }
+  if (!cart.items.length) {
     box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"shopping-cart\" data-size=\"40\"></i>"
       + "<h4>购物车还是空的</h4><p class=\"small\">挑几件喜欢的商品放进来吧</p>"
       + "<a class=\"btn btn-primary mt16\" href=\"index.html\">去逛逛</a></div></div>";
-    mountIcons(box); return;
+    mountIcons(box);
+    return;
   }
-  var t = calc();
-  var allChecked = cart.filter(function (c) { return !c.invalid; }).every(function (c) { return c.checked; });
+  var items = cart.items;
+  var selectable = items.filter(function (i) { return !i.invalid; });
+  var allChecked = selectable.length > 0 && selectable.every(function (i) { return i.checked; });
   box.innerHTML =
     "<div class=\"card card-flush\">"
     + "<div class=\"card-head\"><label class=\"check\"><input type=\"checkbox\" id=\"all\" " + (allChecked ? "checked" : "") + "><span>全选</span></label>"
-    + "<span class=\"small faint\">共 " + cart.length + " 种商品</span></div>"
-    + cart.map(function (c) {
-        var p = P(c.productId);
-        return "<div class=\"order-line\" style=\"" + (c.invalid ? "opacity:.6" : "") + "\">"
-          + "<label class=\"check\" style=\"align-self:center\"><input type=\"checkbox\" data-id=\"" + c.id + "\" " + (c.checked && !c.invalid ? "checked" : "") + " " + (c.invalid ? "disabled" : "") + "></label>"
-          + "<img src=\"" + img(p.image) + "\" alt=\"" + p.name + "\">"
-          + "<div class=\"grow\"><a href=\"product.html?id=" + p.id + "\" class=\"clamp2\" style=\"font-weight:500\">" + p.name + "</a>"
+    + "<span class=\"small faint\">共 " + items.length + " 种商品</span></div>"
+    + items.map(function (item) {
+        return "<div class=\"order-line\" style=\"" + (item.invalid ? "opacity:.6" : "") + "\">"
+          + "<label class=\"check\" style=\"align-self:center\"><input type=\"checkbox\" data-check=\"" + item.id + "\" "
+          + (item.checked && !item.invalid ? "checked" : "") + " " + (item.invalid ? "disabled" : "") + "></label>"
+          + "<img src=\"" + img(item.image, "headphone-01") + "\" alt=\"" + esc(item.name) + "\">"
+          + "<div class=\"grow\"><a href=\"product.html?id=" + item.productId + "\" class=\"clamp2\" style=\"font-weight:500\">" + esc(item.name) + "</a>"
           + "<div class=\"small faint mt8\">默认规格 · 全场包邮</div>"
-          + (c.invalid ? "<div class=\"small\" style=\"color:var(--price)\">" + c.invalidReason + "，暂不可结算</div>" : "") + "</div>"
-          + "<div style=\"width:78px;text-align:right\" class=\"price\">" + yuan(p.price) + "</div>"
-          + "<div class=\"qty\"><button data-dec=\"" + c.id + "\" " + (c.invalid || c.quantity <= 1 ? "disabled" : "") + "><i data-icon=\"minus\" data-size=\"13\"></i></button>"
-          + "<input value=\"" + c.quantity + "\" data-qty=\"" + c.id + "\" inputmode=\"numeric\" " + (c.invalid ? "disabled" : "") + ">"
-          + "<button data-inc=\"" + c.id + "\" " + (c.invalid ? "disabled" : "") + "><i data-icon=\"plus\" data-size=\"13\"></i></button></div>"
-          + "<div style=\"width:92px;text-align:right\" class=\"price strong\">" + yuan(mul(p.price, c.quantity)) + "</div>"
-          + "<button class=\"btn btn-ghost btn-sm\" data-del=\"" + c.id + "\" aria-label=\"删除\"><i data-icon=\"trash-2\" data-size=\"16\"></i></button>"
+          + (item.invalid ? "<div class=\"small\" style=\"color:var(--price)\">" + esc(item.invalidReason || "商品已失效") + "，暂不可结算</div>" : "") + "</div>"
+          + "<div style=\"width:78px;text-align:right\" class=\"price\">" + yuan(item.price) + "</div>"
+          + "<div class=\"qty\"><button data-dec=\"" + item.id + "\" " + (item.invalid || item.quantity <= 1 ? "disabled" : "") + "><i data-icon=\"minus\" data-size=\"13\"></i></button>"
+          + "<input value=\"" + item.quantity + "\" data-qty=\"" + item.id + "\" inputmode=\"numeric\" " + (item.invalid ? "disabled" : "") + ">"
+          + "<button data-inc=\"" + item.id + "\" " + (item.invalid ? "disabled" : "") + "><i data-icon=\"plus\" data-size=\"13\"></i></button></div>"
+          + "<div style=\"width:92px;text-align:right\" class=\"price strong\">" + yuan(item.price * item.quantity) + "</div>"
+          + "<button class=\"btn btn-ghost btn-sm\" data-del=\"" + item.id + "\" aria-label=\"删除\"><i data-icon=\"trash-2\" data-size=\"16\"></i></button>"
           + "</div>";
       }).join("")
     + "</div>"
     + "<div class=\"card mt12 between\" style=\"position:sticky;bottom:12px;flex-wrap:wrap;gap:12px\">"
-    + "<div class=\"row g16\" style=\"flex-wrap:wrap\"><span class=\"small muted\">已选 <b style=\"color:var(--price)\">" + t.count + "</b> 件</span>"
+    + "<div class=\"row g16\" style=\"flex-wrap:wrap\"><span class=\"small muted\">已选 <b style=\"color:var(--price)\">" + (cart.checkedCount || 0) + "</b> 件</span>"
     + "<span class=\"small faint\">全场包邮，运费 ¥0.00</span></div>"
-    + "<div class=\"row g16\"><span class=\"small muted\">合计（不含运费）</span><span class=\"price\" style=\"font-size:22px\">" + yuan(t.amount) + "</span>"
-    + "<button class=\"btn btn-price btn-lg\" id=\"checkout\" " + (t.count === 0 ? "disabled" : "") + ">去结算</button></div></div>";
+    + "<div class=\"row g16\"><span class=\"small muted\">合计（不含运费）</span><span class=\"price\" style=\"font-size:22px\">" + yuan(cart.checkedAmount) + "</span>"
+    + "<button class=\"btn btn-price btn-lg\" id=\"checkout\" " + ((cart.checkedCount || 0) === 0 ? "disabled" : "") + ">去结算</button></div></div>";
   mountIcons(box);
   bind();
 }
 
+/** 写操作都返回整份购物车，直接覆盖本地状态即可 */
+function apply(promise) {
+  return promise.then(function (next) {
+    cart = next;
+    render();
+    syncHeader();
+  }, function (error) {
+    window.showError(error);
+  });
+}
+
 function bind() {
   var box = document.getElementById("cartBox");
-  box.querySelectorAll("[data-id]").forEach(function (cb) {
-    cb.onchange = function () { cart.filter(function (c) { return c.id === Number(cb.dataset.id); })[0].checked = cb.checked; render(); };
+  box.querySelectorAll("[data-check]").forEach(function (cb) {
+    cb.onchange = function () { apply(Api.put("/v1/carts/items/" + cb.dataset.check, { checked: cb.checked })); };
   });
-  box.querySelectorAll("[data-inc]").forEach(function (b) { b.onclick = function () { change(Number(b.dataset.inc), 1); }; });
-  box.querySelectorAll("[data-dec]").forEach(function (b) { b.onclick = function () { change(Number(b.dataset.dec), -1); }; });
-  box.querySelectorAll("[data-qty]").forEach(function (i) { i.oninput = function () { setQty(Number(i.dataset.qty), Number(i.value) || 1); }; });
+  box.querySelectorAll("[data-inc]").forEach(function (b) {
+    b.onclick = function () { change(Number(b.dataset.inc), 1); };
+  });
+  box.querySelectorAll("[data-dec]").forEach(function (b) {
+    b.onclick = function () { change(Number(b.dataset.dec), -1); };
+  });
+  box.querySelectorAll("[data-qty]").forEach(function (input) {
+    input.onchange = function () { setQty(Number(input.dataset.qty), Number(input.value) || 1); };
+  });
   box.querySelectorAll("[data-del]").forEach(function (b) {
     b.onclick = function () {
       var id = Number(b.dataset.del);
       openModal("<p>确定要删除这件商品吗？</p>", { title: "删除商品",
         footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"okDel\">删除</button>" });
       document.getElementById("okDel").onclick = function () {
-        cart = cart.filter(function (c) { return c.id !== id; });
-        DB.cart = cart; closeModal(); toast("已删除", "ok"); render();
+        closeModal();
+        apply(Api.del("/v1/carts/items/" + id).then(function (next) { toast("已删除", "ok"); return next; }));
       };
     };
   });
   var all = document.getElementById("all");
-  if (all) all.onchange = function () {
-    cart.forEach(function (c) { if (!c.invalid) c.checked = all.checked; });
-    render();
-  };
-  var co = document.getElementById("checkout");
-  if (co) co.onclick = function () { location.href = "checkout.html?source=CART"; };
+  if (all) all.onchange = function () { apply(Api.put("/v1/carts/checked", { checked: all.checked })); };
+  var checkout = document.getElementById("checkout");
+  if (checkout) checkout.onclick = function () { location.href = "checkout.html?source=CART"; };
 }
 
-function change(id, d) { var c = cart.filter(function (x) { return x.id === id; })[0]; setQty(id, c.quantity + d); }
-function setQty(id, n) {
-  var c = cart.filter(function (x) { return x.id === id; })[0];
-  if (n > 10) { toast("单品最多购买 10 件", "err"); n = 10; }
-  c.quantity = Math.max(1, n); render();
+function find(id) { return cart.items.filter(function (i) { return i.id === id; })[0]; }
+
+function change(id, delta) {
+  var item = find(id);
+  setQty(id, item.quantity + delta);
 }
-render();
+
+function setQty(id, quantity) {
+  if (quantity > 10) { toast("单品最多购买 10 件", "err"); quantity = 10; }
+  quantity = Math.max(1, quantity);
+  var item = find(id);
+  if (item.quantity === quantity) { render(); return; }
+  apply(Api.put("/v1/carts/items/" + id, { quantity: quantity }));
+}
+
+if (requireLogin()) {
+  render();
+  Api.get("/v1/carts").then(function (data) {
+    cart = data;
+    render();
+  }, function (error) {
+    showError(error);
+  });
+}
 </script>
 </body>
 </html>

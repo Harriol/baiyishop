@@ -22,100 +22,160 @@
   </div>
   <div class="card-body" id="list"></div>
 </div>
+<div class="pagination" id="pager"></div>
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("orders");
-var cur = qs("status", "ALL");
-function itemsHTML(o) {
-  return o.items.map(function (i) {
-    var p = P(i.productId);
-    return "<div class=\"order-line\"><img src=\"" + img(p.image) + "\" alt=\"\">"
-      + "<div class=\"grow\"><a href=\"product.html?id=" + p.id + "\" class=\"clamp2\" style=\"font-weight:500\">" + p.name + "</a>"
-      + "<div class=\"small faint mt8\">默认规格</div></div>"
-      + "<div style=\"text-align:right\" class=\"small muted\">" + yuanPlain(p.price) + "<br>x" + i.quantity + "</div></div>";
+
+var cur = (qs("status", "ALL") || "ALL").toUpperCase();
+var page = 1;
+var SIZE = 5;
+var result = { total: 0, list: [] };
+
+function itemsHTML(order) {
+  return order.items.map(function (item) {
+    return "<div class=\"order-line\"><img src=\"" + img(item.productImage, "headphone-01") + "\" alt=\"\">"
+      + "<div class=\"grow\"><a href=\"product.html?id=" + item.productId + "\" class=\"clamp2\" style=\"font-weight:500\">" + esc(item.productName) + "</a>"
+      + "<div class=\"small faint mt8\">" + esc(item.skuName || "默认规格") + "</div></div>"
+      + "<div style=\"text-align:right\" class=\"small muted\">" + yuanPlain(item.unitPrice) + "<br>x" + item.quantity + "</div></div>";
   }).join("");
 }
-function deadline(o) {
-  var t = new Date(String(o.timeoutAt || "").replace(/-/g, "/"));
-  if (isNaN(t.getTime()) || t.getTime() < Date.now()) return new Date(Date.now() + 14 * 60000 + 32000);
-  return t;
+
+function actions(order) {
+  var no = encodeURIComponent(order.orderNo);
+  var detail = "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>";
+  if (order.status === "PENDING_PAYMENT") {
+    return detail + "<button class=\"btn\" data-cancel=\"" + order.orderNo + "\">取消订单</button>"
+      + "<a class=\"btn btn-price\" href=\"pay.html?no=" + no + "\">立即支付</a>";
+  }
+  if (order.status === "PENDING_SHIPMENT") {
+    return detail + "<button class=\"btn\" data-remind=\"" + order.orderNo + "\">提醒发货</button>";
+  }
+  if (order.status === "PENDING_RECEIPT") {
+    return detail + "<button class=\"btn btn-primary\" data-receive=\"" + order.orderNo + "\">确认收货</button>";
+  }
+  return detail + "<button class=\"btn\" data-again=\"" + order.orderNo + "\">再次购买</button>";
 }
-function actions(o) {
-  var no = o.orderNo;
-  if (o.status === "PENDING_PAYMENT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
-    + "<button class=\"btn\" data-cancel=\"" + no + "\">取消订单</button>"
-    + "<a class=\"btn btn-price\" href=\"pay.html\">立即支付</a>";
-  if (o.status === "PENDING_SHIPMENT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
-    + "<button class=\"btn\" data-remind=\"" + no + "\">提醒发货</button>";
-  if (o.status === "PENDING_RECEIPT") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">查看物流</a>"
-    + "<button class=\"btn btn-primary\" data-receive=\"" + no + "\">确认收货</button>";
-  if (o.status === "COMPLETED") return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
-    + "<button class=\"btn\" data-again=\"" + no + "\">再次购买</button>";
-  return "<a class=\"btn\" href=\"order-detail.html?no=" + no + "\">订单详情</a>"
-    + "<button class=\"btn\" data-delorder=\"" + no + "\">删除订单</button>"
-    + "<button class=\"btn btn-primary\" data-again=\"" + no + "\">再次购买</button>";
-}
+
 function render() {
-  var list = DB.orders.filter(function (o) { return cur === "ALL" || o.status === cur; });
   var box = document.getElementById("list");
+  var list = result.list || [];
   if (!list.length) {
     box.innerHTML = "<div class=\"empty\"><i data-icon=\"package\" data-size=\"40\"></i><h4>暂无相关订单</h4>"
       + "<p class=\"small\">换个状态看看，或者去挑几件商品</p><a class=\"btn btn-primary mt16\" href=\"index.html\">去逛逛</a></div>";
-    mountIcons(box); return;
+    mountIcons(box);
+    renderPager();
+    return;
   }
-  box.innerHTML = list.map(function (o) {
-    var pending = o.status === "PENDING_PAYMENT";
+  box.innerHTML = list.map(function (order) {
     return "<div class=\"order-card\">"
-      + "<div class=\"order-head\"><div class=\"row g12\" style=\"flex-wrap:wrap\"><span class=\"small faint\">下单时间 " + o.createdAt + "</span>"
-      + "<span class=\"small faint\">订单号 " + o.orderNo + "</span>"
-      + (o.trackingNo ? "<span class=\"small faint\">运单号 " + o.trackingNo + "</span>" : "") + "</div>"
-      + "<div class=\"row g12\">" + (pending ? "<span class=\"countdown\" data-cd=\"" + o.orderNo + "\"></span>" : "") + statusPill(o.status) + "</div></div>"
-      + itemsHTML(o)
-      + "<div class=\"order-foot\"><span class=\"small muted\">共 " + o.items.reduce(function (s, i) { return s + i.quantity; }, 0) + " 件，合计</span>"
-      + "<span class=\"price\" style=\"font-size:17px\">" + yuan(o.payAmount) + "</span>"
-      + "<span style=\"width:12px\"></span>" + actions(o) + "</div></div>";
+      + "<div class=\"order-head\"><div class=\"row g12\" style=\"flex-wrap:wrap\"><span class=\"small faint\">下单时间 " + formatTime(order.createdAt) + "</span>"
+      + "<span class=\"small faint\">订单号 " + esc(order.orderNo) + "</span></div>"
+      + "<div class=\"row g12\">" + statusPill(order.status) + "</div></div>"
+      + itemsHTML(order)
+      + "<div class=\"order-foot\"><span class=\"small muted\">共 " + (order.totalQuantity || 0) + " 件，合计</span>"
+      + "<span class=\"price\" style=\"font-size:17px\">" + yuan(order.payAmount) + "</span>"
+      + "<span style=\"width:12px\"></span>" + actions(order) + "</div></div>";
   }).join("");
   mountIcons(box);
-  box.querySelectorAll("[data-cd]").forEach(function (el) {
-    var o = DB.orders.filter(function (x) { return x.orderNo === el.dataset.cd; })[0];
-    countdown(el, deadline(o));
-  });
   bind(box);
+  renderPager();
 }
+
+function renderPager() {
+  var el = document.getElementById("pager");
+  var pages = Math.max(1, Math.ceil((result.total || 0) / SIZE));
+  if (pages <= 1) { el.innerHTML = ""; return; }
+  var html = "";
+  for (var i = 1; i <= pages; i++) html += "<button class=\"" + (i === page ? "on" : "") + "\" data-p=\"" + i + "\">" + i + "</button>";
+  el.innerHTML = html;
+  el.querySelectorAll("[data-p]").forEach(function (b) {
+    b.onclick = function () { page = Number(b.dataset.p); load(); };
+  });
+}
+
 function bind(box) {
-  box.querySelectorAll("[data-cancel]").forEach(function (b) { b.onclick = function () { confirmCancel(b.dataset.cancel); }; });
-  box.querySelectorAll("[data-remind]").forEach(function (b) { b.onclick = function () { toast("已提醒商家尽快发货", "ok"); }; });
-  box.querySelectorAll("[data-receive]").forEach(function (b) { b.onclick = function () { confirmReceive(b.dataset.receive); }; });
-  box.querySelectorAll("[data-again]").forEach(function (b) { b.onclick = function () { toast("已加入购物车", "ok"); }; });
-  box.querySelectorAll("[data-delorder]").forEach(function (b) { b.onclick = function () { toast("订单已删除", "ok"); }; });
+  box.querySelectorAll("[data-cancel]").forEach(function (b) {
+    b.onclick = function () { confirmCancel(b.dataset.cancel); };
+  });
+  box.querySelectorAll("[data-remind]").forEach(function (b) {
+    b.onclick = function () { toast("已提醒商家尽快发货", "ok"); };
+  });
+  box.querySelectorAll("[data-receive]").forEach(function (b) {
+    b.onclick = function () { confirmReceive(b.dataset.receive); };
+  });
+  box.querySelectorAll("[data-again]").forEach(function (b) {
+    b.onclick = function () { buyAgain(b.dataset.again, b); };
+  });
 }
+
 function confirmCancel(no) {
-  openModal("<p>取消后订单将关闭，已锁定的库存会释放。确定取消订单 " + no + " 吗？</p>", { title: "取消订单",
+  openModal("<p>取消后订单将关闭，已锁定的库存会释放。确定取消订单 " + esc(no) + " 吗？</p>", { title: "取消订单",
     footer: "<button class=\"btn\" data-close>再想想</button><button class=\"btn btn-price\" id=\"ok\">确定取消</button>" });
   document.getElementById("ok").onclick = function () {
-    var o = DB.orders.filter(function (x) { return x.orderNo === no; })[0];
-    o.status = "CANCELLED"; o.cancelTime = "刚刚"; o.cancelReason = "用户主动取消";
-    closeModal(); toast("订单已取消", "ok"); render();
+    closeModal();
+    Api.put("/v1/orders/" + encodeURIComponent(no) + "/cancel").then(function () {
+      toast("订单已取消", "ok");
+      load();
+    }, showError);
   };
 }
+
 function confirmReceive(no) {
   openModal("<p>请确认已收到商品。确认后订单将完成，且不可撤销。</p>", { title: "确认收货",
     footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认收货</button>" });
   document.getElementById("ok").onclick = function () {
-    var o = DB.orders.filter(function (x) { return x.orderNo === no; })[0];
-    o.status = "COMPLETED"; o.receiveTime = "刚刚";
-    closeModal(); toast("确认收货成功", "ok"); render();
+    closeModal();
+    Api.put("/v1/orders/" + encodeURIComponent(no) + "/receive").then(function () {
+      toast("确认收货成功", "ok");
+      load();
+    }, showError);
   };
 }
+
+/** 再次购买：把订单里的 SKU 逐个加回购物车 */
+function buyAgain(no, button) {
+  var order = (result.list || []).filter(function (o) { return o.orderNo === no; })[0];
+  if (!order) return;
+  button.disabled = true;
+  var chain = Promise.resolve();
+  order.items.forEach(function (item) {
+    chain = chain.then(function () { return Api.post("/v1/carts/items", { skuId: item.skuId, quantity: item.quantity }); });
+  });
+  chain.then(function () {
+    toast("已加入购物车", "ok");
+    window.Store.refreshCartCount().then(function () { window.repaintHeader("orders"); });
+  }, showError).then(function () { button.disabled = false; });
+}
+
+function load() {
+  Api.get("/v1/orders?status=" + encodeURIComponent(cur) + "&page=" + page + "&size=" + SIZE).then(function (data) {
+    result = data;
+    render();
+  }, showError);
+}
+
 document.querySelectorAll("#tabs button").forEach(function (b) {
-  if (b.dataset.value === cur) { document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); }); b.classList.add("on"); }
-  b.onclick = function () { cur = b.dataset.value; render(); };
+  if (b.dataset.value === cur) {
+    document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+  }
+  b.onclick = function () {
+    cur = b.dataset.value;
+    page = 1;
+    document.querySelectorAll("#tabs button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    load();
+  };
 });
-render();
+
+if (requireLogin()) load();
 </script>
 </body>
 </html>

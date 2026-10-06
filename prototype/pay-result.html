@@ -20,28 +20,78 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("orders");
 document.getElementById("steps").innerHTML = stepbar(4);
-var result = qs("result", "success");
-var paid = JSON.parse(sessionStorage.getItem("baiyi_paid") || "null") || { orderNo: "2026092710123344556677", payAmount: "899.00", channel: "WECHAT", payTime: "2026-09-27 10:14:02" };
-var ok = result === "success";
-var chName = paid.channel === "ALIPAY" ? "支付宝" : "微信支付";
-document.getElementById("icon").innerHTML = "<i data-icon=\"" + (ok ? "circle-check" : "circle-x") + "\" data-size=\"56\" style=\"color:" + (ok ? "var(--brand)" : "var(--price)") + "\"></i>";
-document.getElementById("title").textContent = ok ? "支付成功" : "支付失败";
-document.getElementById("desc").textContent = ok ? "订单已进入待发货状态，商家会尽快为你发货" : "支付未完成，订单仍在待付款状态，可在 15 分钟内重新支付";
-document.getElementById("amount").innerHTML = "<span class=\"price\">" + yuan(paid.payAmount) + "</span>";
-document.getElementById("actions").innerHTML = ok
-  ? "<a class=\"btn btn-primary btn-lg\" href=\"order-detail.html?no=" + paid.orderNo + "\">查看订单</a><a class=\"btn btn-lg\" href=\"index.html\">继续逛逛</a>"
-  : "<a class=\"btn btn-price btn-lg\" href=\"pay.html\">重新支付</a><a class=\"btn btn-lg\" href=\"orders.html\">查看订单</a>";
-document.getElementById("info").innerHTML =
-  "<div class=\"amount-row\"><span class=\"muted\">订单号</span><span>" + paid.orderNo + "</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">支付方式</span><span>" + chName + "（模拟）</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">支付时间</span><span>" + (ok ? paid.payTime : "—") + "</span></div>"
-  + "<div class=\"amount-row\"><span class=\"muted\">发货时效</span><span>48 小时内发出</span></div>";
-mountIcons(document);
+
+var orderNo = qs("no", "");
+var ok = qs("result", "success") === "success";
+var order = null;
+var payment = null;
+
+function render() {
+  if (!order) {
+    document.getElementById("icon").innerHTML = "<i data-icon=\"loader-circle\" data-size=\"56\" style=\"color:var(--ink-3)\"></i>";
+    document.getElementById("title").textContent = "正在确认支付结果…";
+    document.getElementById("desc").textContent = "";
+    mountIcons(document);
+    return;
+  }
+  ok = ok || order.status === "PENDING_SHIPMENT" || order.status === "PENDING_RECEIPT" || order.status === "COMPLETED";
+  document.getElementById("icon").innerHTML = "<i data-icon=\"" + (ok ? "circle-check" : "circle-x") + "\" data-size=\"56\" style=\"color:" + (ok ? "var(--brand)" : "var(--price)") + "\"></i>";
+  document.getElementById("title").textContent = ok ? "支付成功" : "支付失败";
+  document.getElementById("desc").textContent = ok
+    ? "订单已进入待发货状态，商家会尽快为你发货"
+    : "支付未完成，订单仍在待付款状态，可在 15 分钟内重新支付";
+  document.getElementById("amount").innerHTML = "<span class=\"price\">" + yuan(order.payAmount) + "</span>";
+  document.getElementById("actions").innerHTML = ok
+    ? "<a class=\"btn btn-primary btn-lg\" href=\"order-detail.html?no=" + encodeURIComponent(order.orderNo) + "\">查看订单</a><a class=\"btn btn-lg\" href=\"index.html\">继续逛逛</a>"
+    : "<a class=\"btn btn-price btn-lg\" href=\"pay.html?no=" + encodeURIComponent(order.orderNo) + "\">重新支付</a><a class=\"btn btn-lg\" href=\"orders.html\">查看订单</a>";
+  document.getElementById("info").innerHTML =
+    "<div class=\"amount-row\"><span class=\"muted\">订单号</span><span>" + esc(order.orderNo) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">支付方式</span><span>" + esc(payment ? Store.channelText(payment.channel) : "—") + "（模拟）</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">支付时间</span><span>" + (ok && payment && payment.payTime ? formatTime(payment.payTime) : "—") + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">订单状态</span><span>" + Store.statusPill(order.status) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">发货时效</span><span>48 小时内发出</span></div>";
+  mountIcons(document);
+}
+
+if (requireLogin() && orderNo) {
+  Api.get("/v1/orders/" + encodeURIComponent(orderNo)).then(function (data) {
+    order = data;
+    render();
+    settlePayment();
+    return Api.get("/v1/payments/by-order/" + encodeURIComponent(orderNo), { silent: true });
+  }, function (error) {
+    showError(error);
+  }).then(function (data) {
+    payment = data;
+    render();
+  }, function () { /* 还没生成支付单或查询失败都不影响结果页展示 */ });
+}
+render();
+
+/**
+ * 支付成功后订单状态由支付事件异步推进，刚跳过来可能还是「待付款」。
+ * 这里轮询几次，让「订单状态」与「支付成功」保持一致。
+ */
+function settlePayment() {
+  if (!ok) return;
+  var attempts = 0;
+  var timer = setInterval(function () {
+    attempts++;
+    if (!order || order.status !== "PENDING_PAYMENT" || attempts > 5) { clearInterval(timer); return; }
+    Api.get("/v1/orders/" + encodeURIComponent(orderNo), { silent: true }).then(function (data) {
+      order = data;
+      render();
+      if (order.status !== "PENDING_PAYMENT") clearInterval(timer);
+    }, function () { /* 忽略单次失败，继续轮询 */ });
+  }, 900);
+}
 </script>
 </body>
 </html>

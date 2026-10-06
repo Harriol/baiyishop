@@ -14,68 +14,146 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
 document.getElementById("steps").innerHTML = stepbar(2);
-var source = qs("source", "CART"), pid = Number(qs("id", 0)), qn = Number(qs("qty", 1));
-var addrId = (DB.addresses.filter(function (a) { return a.isDefault; })[0] || DB.addresses[0]).id;
 
-function items() {
-  if (source === "BUY_NOW") { var p = P(pid) || DB.products[0]; return [{ productId: p.id, quantity: qn }]; }
-  return DB.cart.filter(function (c) { return c.checked && !c.invalid; }).map(function (c) { return { productId: c.productId, quantity: c.quantity }; });
+var source = (qs("source", "CART") || "CART").toUpperCase();
+var skuId = qs("skuId", "") ? Number(qs("skuId")) : null;
+var quantity = qs("qty", "") ? Number(qs("qty")) : null;
+var addresses = [];
+var settle = null;
+var addressId = null;
+var submitting = false;
+var errorMessage = null;
+var cartItemIds = [];   // CART 下单必须显式传勾选条目 id（下单接口不会自行回退到「已勾选」）
+
+/** 结算请求体：购物车走勾选条目 id，立即购买走 skuId + 数量 */
+function settleBody() {
+  if (source === "BUY_NOW") return { source: "BUY_NOW", skuId: skuId, quantity: quantity || 1 };
+  return { source: "CART", cartItemIds: cartItemIds };
 }
 
 function render() {
-  var list = items();
-  var amount = sum(list.map(function (i) { return mul(P(i.productId).price, i.quantity); }));
-  var addr = DB.addresses.filter(function (a) { return a.id === addrId; })[0];
-  document.getElementById("box").innerHTML =
+  var box = document.getElementById("box");
+  if (errorMessage) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"circle-alert\" data-size=\"40\"></i>"
+      + "<h4>无法结算</h4><p class=\"small\">" + esc(errorMessage) + "</p>"
+      + "<a class=\"btn mt16\" href=\"cart.html\">返回购物车</a></div></div>";
+    mountIcons(box);
+    return;
+  }
+  if (!settle) {
+    box.innerHTML = "<div class=\"card\"><div class=\"empty\"><i data-icon=\"loader-circle\" data-size=\"34\"></i><h4>正在计算订单金额…</h4></div></div>";
+    mountIcons(box);
+    return;
+  }
+  var chosen = addresses.filter(function (a) { return a.id === addressId; })[0] || null;
+  box.innerHTML =
     "<div class=\"card\"><div class=\"between mb12\"><h3 style=\"font-size:15px;display:flex;align-items:center;gap:6px\"><i data-icon=\"map-pin\" data-size=\"16\"></i>收货地址</h3>"
-    + "<button class=\"btn btn-sm\" id=\"addAddr\"><i data-icon=\"plus\" data-size=\"14\"></i>新增地址</button></div>"
-    + "<div style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px\">"
-    + DB.addresses.map(function (a) {
-        return "<div class=\"addr-card " + (a.id === addrId ? "on" : "") + "\" data-a=\"" + a.id + "\">"
-          + "<div class=\"strong\">" + a.receiverName + " <span class=\"muted small\">" + a.receiverPhone.slice(0, 3) + "****" + a.receiverPhone.slice(7) + "</span>"
-          + (a.isDefault ? " <span class=\"tag tag-brand\">默认</span>" : "") + "</div>"
-          + "<div class=\"small muted mt8\">" + a.province + a.city + a.district + " " + a.detail + "</div></div>";
-      }).join("") + "</div></div>"
+    + "<a class=\"btn btn-sm\" href=\"address.html\"><i data-icon=\"plus\" data-size=\"14\"></i>管理地址</a></div>"
+    + (addresses.length
+        ? "<div style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px\">"
+          + addresses.map(function (a) {
+              return "<div class=\"addr-card " + (a.id === addressId ? "on" : "") + "\" data-a=\"" + a.id + "\">"
+                + "<div class=\"strong\">" + esc(a.receiverName) + " <span class=\"muted small\">" + esc(a.receiverPhone) + "</span>"
+                + (a.isDefault ? " <span class=\"tag tag-brand\">默认</span>" : "") + "</div>"
+                + "<div class=\"small muted mt8\">" + esc(a.province + a.city + a.district + " " + a.detail) + "</div></div>";
+            }).join("") + "</div>"
+        : "<div class=\"empty\"><i data-icon=\"map-pin\" data-size=\"34\"></i><h4>还没有收货地址</h4>"
+          + "<p class=\"small\">先添加一个地址再提交订单</p><a class=\"btn btn-primary mt16\" href=\"address.html\">去添加</a></div>")
+    + "</div>"
 
     + "<div class=\"card mt12\"><h3 style=\"font-size:15px\" class=\"mb12\">商品清单</h3>"
     + "<table class=\"table mt12\"><thead><tr><th>商品</th><th>单价</th><th>数量</th><th class=\"num\">小计</th></tr></thead><tbody>"
-    + list.map(function (i) {
-        var p = P(i.productId);
-        return "<tr><td><div class=\"row g8\"><img src=\"" + img(p.image) + "\" alt=\"\" style=\"width:48px;height:48px;border-radius:6px;object-fit:cover\">"
-          + "<a href=\"product.html?id=" + p.id + "\" class=\"clamp2\">" + p.name + "</a></div></td>"
-          + "<td class=\"num\">" + yuanPlain(p.price) + "</td><td class=\"num\">x" + i.quantity + "</td>"
-          + "<td class=\"num price\">" + yuan(mul(p.price, i.quantity)) + "</td></tr>";
-      }).join("") + "</tbody></table></div>"
+    + settle.items.map(function (item) {
+        return "<tr><td><div class=\"row g8\"><img src=\"" + img(item.image, "headphone-01") + "\" alt=\"\" style=\"width:48px;height:48px;border-radius:6px;object-fit:cover\">"
+          + "<a href=\"product.html?id=" + item.productId + "\" class=\"clamp2\">" + esc(item.name) + "</a></div></td>"
+          + "<td class=\"num\">" + yuanPlain(item.price) + "</td><td class=\"num\">x" + item.quantity + "</td>"
+          + "<td class=\"num price\">" + yuan(item.totalAmount) + "</td></tr>";
+      }).join("")
+    + (settle.invalidItems || []).map(function (item) {
+        return "<tr style=\"opacity:.6\"><td><a href=\"product.html?id=" + item.productId + "\" class=\"clamp2\">" + esc(item.name) + "</a></td>"
+          + "<td class=\"num\">" + yuanPlain(item.price) + "</td><td class=\"num\">x" + item.quantity + "</td>"
+          + "<td class=\"num\" style=\"color:var(--price)\">" + esc(item.invalidReason || "失效") + "</td></tr>";
+      }).join("")
+    + "</tbody></table></div>"
 
     + "<div class=\"card mt12\"><h3 style=\"font-size:15px\">订单备注</h3>"
-    + "<input class=\"input mt12\" id=\"remark\" placeholder=\"选填，如对发货时间的要求\" maxlength=\"100\"></div>"
+    + "<input class=\"input mt12\" id=\"remark\" placeholder=\"选填，如对发货时间的要求\" maxlength=\"200\"></div>"
 
-    + "<div class=\"card mt12\"><div class=\"amount-row\"><span class=\"muted\">商品金额</span><span>" + yuanPlain(amount) + "</span></div>"
-    + "<div class=\"amount-row\"><span class=\"muted\">运费</span><span>" + yuanPlain("0.00") + " <span class=\"tag tag-brand\">全场包邮</span></span></div>"
-    + "<div class=\"amount-row total\"><span class=\"strong\">应付金额</span><span class=\"price\">" + yuan(amount) + "</span></div></div>"
+    + "<div class=\"card mt12\"><div class=\"amount-row\"><span class=\"muted\">商品金额</span><span>" + yuanPlain(settle.totalAmount) + "</span></div>"
+    + "<div class=\"amount-row\"><span class=\"muted\">运费</span><span>" + yuanPlain(settle.freightAmount) + " <span class=\"tag tag-brand\">全场包邮</span></span></div>"
+    + "<div class=\"amount-row total\"><span class=\"strong\">应付金额</span><span class=\"price\">" + yuan(settle.payAmount) + "</span></div></div>"
 
     + "<div class=\"card mt12 between\" style=\"flex-wrap:wrap;gap:12px\">"
     + "<span class=\"small faint\">提交后 15 分钟内未支付，订单将自动取消并释放库存</span>"
-    + "<button class=\"btn btn-price btn-lg\" id=\"submit\">提交订单</button></div>";
-  mountIcons(document.getElementById("box"));
-  document.querySelectorAll("[data-a]").forEach(function (c) { c.onclick = function () { addrId = Number(c.dataset.a); render(); }; });
-  document.getElementById("addAddr").onclick = function () { toast("原型中地址新增在「地址管理」页演示"); };
-  document.getElementById("submit").onclick = function () {
-    if (!DB.addresses.length) { toast("请先添加收货地址", "err"); return; }
-    var no = genOrderNo();
-    sessionStorage.setItem("baiyi_pending", JSON.stringify({
-      orderNo: no, payAmount: amount, source: source, items: list,
-      timeoutAt: new Date(Date.now() + 15 * 60000).toISOString(), remark: document.getElementById("remark").value
-    }));
-    location.href = "pay.html";
-  };
+    + "<button class=\"btn btn-price btn-lg\" id=\"submit\" " + (chosen && !submitting ? "" : "disabled") + ">"
+    + (submitting ? "提交中…" : "提交订单") + "</button></div>";
+
+  mountIcons(box);
+  box.querySelectorAll("[data-a]").forEach(function (card) {
+    card.onclick = function () { addressId = Number(card.dataset.a); render(); };
+  });
+  var submit = document.getElementById("submit");
+  if (submit) submit.onclick = doSubmit;
 }
-render();
+
+function doSubmit() {
+  if (submitting) return;
+  if (!addressId) { toast("请选择收货地址", "err"); return; }
+  submitting = true;
+  render();
+  var body = settleBody();
+  body.addressId = addressId;
+  var remark = document.getElementById("remark");
+  body.remark = remark ? remark.value.trim() : "";
+  Api.post("/v1/orders", body, { requestId: Api.uuid() }).then(function (order) {
+    toast("订单提交成功", "ok");
+    window.Store.refreshCartCount();
+    setTimeout(function () { location.href = "pay.html?no=" + encodeURIComponent(order.orderNo); }, 500);
+  }, function (error) {
+    submitting = false;
+    render();
+    showError(error);
+  });
+}
+
+if (requireLogin()) {
+  render();
+  // 购物车结算先取勾选条目，settle 与下单共用同一份 id 列表
+  (source === "BUY_NOW" ? Promise.resolve(null) : Api.get("/v1/carts")).then(function (cart) {
+    if (cart) {
+      cartItemIds = (cart.items || [])
+        .filter(function (item) { return item.checked && !item.invalid; })
+        .map(function (item) { return item.id; });
+    }
+    if (source !== "BUY_NOW" && !cartItemIds.length) {
+      errorMessage = "购物车里没有勾选的商品，请先回购物车勾选后再结算";
+      render();
+      return null;
+    }
+    return Api.post("/v1/orders/settle", settleBody()).then(function (data) {
+      settle = data;
+      addressId = data.defaultAddress ? data.defaultAddress.id : null;
+      return Api.get("/v1/addresses");
+    }, function (error) {
+      errorMessage = error.message || "结算失败，请稍后重试";
+      throw error;
+    }).then(function (list) {
+      addresses = list || [];
+      if (!addressId && addresses.length) addressId = addresses[0].id;
+      render();
+    }, function () { render(); });
+  }, function (error) {
+    errorMessage = error.message || "购物车加载失败，请返回购物车重试";
+    render();
+  });
+}
 </script>
 </body>
 </html>

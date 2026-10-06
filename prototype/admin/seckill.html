@@ -10,83 +10,224 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "seckill" })) {
+if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "seckill:read" })) {
+  var canWrite = hasPerm("seckill:write");
+  var page = 1, SIZE = 5, total = 0;
+  var activities = [];
+  var products = [];
+
+  function timeText(value) {
+    return value ? formatTime(value) : "—";
+  }
+
+  /** 用户输入的时间统一转成后端要的 ISO LocalDateTime（yyyy-MM-ddTHH:mm:ss） */
+  function toLocalDateTime(value) {
+    var text = String(value || "").trim().replace(" ", "T");
+    if (!text) return null;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return text + ":00";
+    return text;
+  }
+
+  function load() {
+    Api.get("/v1/admin/seckill/activities?page=" + page + "&size=" + SIZE).then(function (data) {
+      activities = data.list || [];
+      total = data.total || 0;
+      render();
+    }, showError);
+  }
+
+  function statusPillOf(status) {
+    if (status === "RUNNING") return "<span class=\"pill pill-pay\">抢购中</span>";
+    if (status === "NOT_STARTED") return "<span class=\"pill pill-ship\">即将开始</span>";
+    return "<span class=\"pill pill-cancel\">已结束</span>";
+  }
+
   function render() {
-    document.getElementById("list").innerHTML = DB.seckill.sessions.map(function (s) {
-      var items = DB.seckill.items.filter(function (i) { return i.sessionId === s.id; });
-      var pill = s.status === "RUNNING" ? "<span class=\"pill pill-pay\">抢购中</span>"
-        : s.status === "NOT_STARTED" ? "<span class=\"pill pill-ship\">即将开始</span>" : "<span class=\"pill pill-cancel\">已结束</span>";
-      return "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"ticket-percent\" data-size=\"16\"></i>" + s.name + " " + pill + "</h3>"
-        + "<div class=\"small faint\">" + s.startTime + " ~ " + s.endTime + " · 共 " + items.length + " 个秒杀商品</div>"
+    var box = document.getElementById("list");
+    if (!activities.length) {
+      box.innerHTML = "<div class=\"panel\"><div class=\"panel-body\"><div class=\"empty\"><i data-icon=\"ticket-percent\" data-size=\"34\"></i><h4>还没有秒杀活动</h4></div></div></div>";
+      mountIcons(box);
+      renderPager();
+      return;
+    }
+    box.innerHTML = activities.map(function (a) {
+      var skus = a.skus || [];
+      return "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"ticket-percent\" data-size=\"16\"></i>" + esc(a.name) + " " + statusPillOf(a.status) + "</h3>"
+        + "<div class=\"small faint\">" + timeText(a.startTime) + " ~ " + timeText(a.endTime) + " · 共 " + skus.length + " 个秒杀商品</div>"
         + "<div class=\"inline\">"
-        + (s.status === "RUNNING" ? "<button class=\"btn btn-sm\" data-end=\"" + s.id + "\">结束活动并回补</button>" : "")
-        + "<button class=\"btn btn-sm\" data-edit=\"" + s.id + "\">编辑</button></div></div>"
-        + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">秒杀价</th><th class=\"num\">原价</th><th class=\"num\">划拨库存</th><th class=\"num\">已售</th><th class=\"num\">每人限购</th><th>进度</th></tr></thead><tbody>"
-        + items.map(function (it) {
-            var p = P(it.productId);
-            var pct = Math.round(it.sold / it.total * 100);
-            return "<tr><td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.image) + "\" alt=\"\"><span>" + p.name + "</span></div></td>"
-              + "<td class=\"num price\">" + yuanPlain(it.seckillPrice) + "</td><td class=\"num muted\">" + yuanPlain(it.originPrice) + "</td>"
-              + "<td class=\"num\">" + it.total + "</td><td class=\"num\">" + it.sold + "</td><td class=\"num\">" + it.limitPerUser + "</td>"
+        + (canWrite && a.status === "RUNNING" ? "<button class=\"btn btn-sm\" data-end=\"" + a.id + "\">结束活动并回补</button>" : "")
+        + (canWrite && a.status === "NOT_STARTED" ? "<button class=\"btn btn-sm\" data-edit=\"" + a.id + "\">编辑</button>" : "")
+        + (canWrite && a.status !== "RUNNING" ? "<button class=\"btn btn-sm\" data-del=\"" + a.id + "\">删除</button>" : "")
+        + "</div></div>"
+        + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">秒杀价</th><th class=\"num\">原价</th><th class=\"num\">划拨库存</th><th class=\"num\">剩余</th><th class=\"num\">已售</th><th class=\"num\">每人限购</th><th>进度</th></tr></thead><tbody>"
+        + (skus.length ? skus.map(function (sku) {
+            var sold = Math.max(0, (sku.allocStock || 0) - (sku.remaining || 0));
+            var pct = sku.allocStock ? Math.round(sold / sku.allocStock * 100) : 0;
+            return "<tr><td><div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(sku.image, "headphone-01") + "\" alt=\"\"><span>" + esc(sku.productName) + "</span></div></td>"
+              + "<td class=\"num price\">" + yuanPlain(sku.seckillPrice) + "</td><td class=\"num muted\">" + yuanPlain(sku.originalPrice) + "</td>"
+              + "<td class=\"num\">" + sku.allocStock + "</td><td class=\"num\">" + sku.remaining + "</td><td class=\"num\">" + sold + "</td>"
+              + "<td class=\"num\">" + sku.limitPerUser + "</td>"
               + "<td style=\"min-width:120px\"><div class=\"progress\"><i style=\"width:" + pct + "%\"></i></div><span class=\"small faint\">" + pct + "%</span></td></tr>";
-          }).join("")
+          }).join("") : "<tr><td colspan=\"8\"><div class=\"empty\"><h4>该活动没有商品</h4></div></td></tr>")
         + "</tbody></table></div></div>";
     }).join("");
+    mountIcons(box);
+    renderPager();
 
-    document.querySelectorAll("[data-end]").forEach(function (b) {
+    box.querySelectorAll("[data-end]").forEach(function (b) {
       b.onclick = function () {
-        var id = Number(b.dataset.end);
-        var items = DB.seckill.items.filter(function (i) { return i.sessionId === id; });
-        var left = items.reduce(function (n, i) { return n + (i.total - i.sold); }, 0);
+        var activity = activities.filter(function (a) { return a.id === Number(b.dataset.end); })[0];
+        var left = (activity.skus || []).reduce(function (n, s) { return n + (s.remaining || 0); }, 0);
         openModal("<p>结束后未售出的秒杀库存将自动回补到普通库存。</p>"
           + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>本场未售出合计 <b>" + left + "</b> 件，回补后将写入秒杀池流水与库存流水（REQ-504）。</div>",
           { title: "结束活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">确认结束并回补</button>" });
         document.getElementById("ok").onclick = function () {
-          items.forEach(function (i) { i.sold = i.total; });
-          DB.seckill.sessions.filter(function (s) { return s.id === id; })[0].status = "ENDED";
-          closeModal(); toast("活动已结束，" + left + " 件库存已回补", "ok"); render();
+          Api.put("/v1/admin/seckill/activities/" + activity.id + "/status").then(function () {
+            closeModal();
+            toast("活动已结束，" + left + " 件库存已回补", "ok");
+            load();
+          }, showError);
         };
       };
     });
-    document.querySelectorAll("[data-edit]").forEach(function (b) { b.onclick = function () { toast("编辑活动：正式实现调用活动更新接口"); }; });
+    box.querySelectorAll("[data-del]").forEach(function (b) {
+      b.onclick = function () {
+        var activity = activities.filter(function (a) { return a.id === Number(b.dataset.del); })[0];
+        openModal("<p>确定删除活动「" + esc(activity.name) + "」？未售出库存会先回补。</p>",
+          { title: "删除活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">确认删除</button>" });
+        document.getElementById("ok").onclick = function () {
+          closeModal();
+          Api.del("/v1/admin/seckill/activities/" + activity.id).then(function () { toast("活动已删除", "ok"); load(); }, showError);
+        };
+      };
+    });
+    box.querySelectorAll("[data-edit]").forEach(function (b) {
+      b.onclick = function () { editActivity(activities.filter(function (a) { return a.id === Number(b.dataset.edit); })[0]); };
+    });
+  }
+
+  function renderPager() {
+    var pages = Math.max(1, Math.ceil(total / SIZE));
+    var el = document.getElementById("pager");
+    if (pages <= 1) { el.innerHTML = ""; return; }
+    el.innerHTML = "<button " + (page === 1 ? "disabled" : "") + " data-p=\"" + (page - 1) + "\">上一页</button>"
+      + "<span class=\"small muted\">第 " + page + " / " + pages + " 页</span>"
+      + "<button " + (page === pages ? "disabled" : "") + " data-p=\"" + (page + 1) + "\">下一页</button>";
+    el.querySelectorAll("[data-p]").forEach(function (b) { b.onclick = function () { page = Number(b.dataset.p); load(); }; });
+  }
+
+  function editActivity(activity) {
+    openModal("<div class=\"form-grid\">"
+      + "<div class=\"field\"><label>活动名称</label><input class=\"input\" id=\"a-name\" value=\"" + esc(activity.name) + "\"></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" value=\"" + esc(String(activity.startTime || "").replace(" ", "T")) + "\" placeholder=\"2026-10-01T10:00:00\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" value=\"" + esc(String(activity.endTime || "").replace(" ", "T")) + "\" placeholder=\"2026-10-01T12:00:00\"></div></div>"
+      + "<div class=\"alert alert-plain\"><i data-icon=\"info\" data-size=\"15\"></i>仅未开始的活动可修改，且只支持名称与起止时间；商品与库存需删除后重建。</div></div>",
+      { title: "编辑秒杀活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
+    document.getElementById("ok").onclick = function () {
+      var name = document.getElementById("a-name").value.trim();
+      var startTime = toLocalDateTime(document.getElementById("a-start").value);
+      var endTime = toLocalDateTime(document.getElementById("a-end").value);
+      if (!name) { toast("请填写活动名称", "err"); return; }
+      if (!startTime || !endTime || endTime <= startTime) { toast("起止时间不合法（10001）", "err"); return; }
+      Api.put("/v1/admin/seckill/activities/" + activity.id, { name: name, startTime: startTime, endTime: endTime })
+        .then(function () { closeModal(); toast("活动已更新", "ok"); load(); }, showError);
+    };
+  }
+
+  /* ---------------- 新增活动 ---------------- */
+  function loadProducts(keyword) {
+    var query = "page=1&size=50&status=ON_SALE";
+    if (keyword) query += "&keyword=" + encodeURIComponent(keyword);
+    Api.get("/v1/admin/products?" + query, { silent: true }).then(function (data) {
+      products = data.list || [];
+      var select = document.getElementById("a-product");
+      if (!select) return;
+      select.innerHTML = products.length
+        ? products.map(function (p) { return "<option value=\"" + p.id + "\">" + esc(p.name) + "（ID " + p.id + "）</option>"; }).join("")
+        : "<option value=\"\">没有在售商品</option>";
+      loadSkus();
+    }, function () { /* 商品拉取失败时保持空列表 */ });
+  }
+
+  function loadSkus() {
+    var productId = Number(document.getElementById("a-product").value || 0);
+    var select = document.getElementById("a-sku");
+    if (!productId) { select.innerHTML = "<option value=\"\">请先选择商品</option>"; return; }
+    select.innerHTML = "<option value=\"\">加载中…</option>";
+    Api.get("/v1/admin/products/" + productId, { silent: true }).then(function (p) {
+      select.innerHTML = (p.skus || []).map(function (s) {
+        return "<option value=\"" + s.id + "\" data-price=\"" + s.price + "\">" + esc(s.specName || "默认规格") + " · " + Store.moneyPlain(s.price) + "</option>";
+      }).join("") || "<option value=\"\">该商品没有 SKU</option>";
+      var first = (p.skus || [])[0];
+      if (first) document.getElementById("a-price").value = Store.money(first.price);
+    }, function () { select.innerHTML = "<option value=\"\">SKU 加载失败</option>"; });
   }
 
   function create() {
     openModal(
       "<div class=\"form-grid\">"
       + "<div class=\"field\"><label>活动名称</label><input class=\"input\" id=\"a-name\" placeholder=\"如：国庆秒杀\"></div>"
-      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" placeholder=\"2026-10-01 10:00:00\"></div>"
-      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" placeholder=\"2026-10-01 12:00:00\"></div></div>"
-      + "<div class=\"field\"><label>秒杀商品</label><select class=\"select\" id=\"a-sku\">"
-      + DB.products.map(function (p) { return "<option value=\"" + p.id + "\">" + p.name + "</option>"; }).join("") + "</select></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" placeholder=\"2026-10-01T10:00:00\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" placeholder=\"2026-10-01T12:00:00\"></div></div>"
+      + "<div class=\"field\"><label>商品（在售）</label><input class=\"input\" id=\"a-kw\" placeholder=\"按名称搜索，留空取前 50 个\">"
+      + "<select class=\"select mt8\" id=\"a-product\"></select></div>"
+      + "<div class=\"field\"><label>SKU</label><select class=\"select\" id=\"a-sku\"><option value=\"\">请先选择商品</option></select></div>"
       + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>秒杀价（元）</label><input class=\"input\" id=\"a-price\" placeholder=\"59.00\"></div>"
       + "<div class=\"field\" style=\"flex:1\"><label>划拨库存</label><input class=\"input\" id=\"a-stock\" placeholder=\"100\"></div>"
-      + "<div class=\"field\" style=\"flex:1\"><label>每人限购</label><input class=\"input\" id=\"a-limit\" placeholder=\"1\"></div></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>每人限购</label><input class=\"input\" id=\"a-limit\" value=\"1\"></div></div>"
       + "<div class=\"alert alert-plain\"><i data-icon=\"info\" data-size=\"15\"></i>划拨时普通库存立即扣减；超出可售库存会被拒绝（40005）；活动结束未售出自动回补。</div></div>",
       { title: "新增秒杀活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">创建活动</button>" });
+
+    loadProducts("");
+    document.getElementById("a-product").onchange = loadSkus;
+    document.getElementById("a-sku").onchange = function () {
+      var option = this.options[this.selectedIndex];
+      if (option && option.dataset.price) document.getElementById("a-price").value = Store.money(Number(option.dataset.price));
+    };
+    document.getElementById("a-kw").addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") loadProducts(this.value.trim());
+    });
     document.getElementById("ok").onclick = function () {
       var name = document.getElementById("a-name").value.trim();
-      var start = document.getElementById("a-start").value.trim();
-      var end = document.getElementById("a-end").value.trim();
-      var stock = Number(document.getElementById("a-stock").value);
+      var startTime = toLocalDateTime(document.getElementById("a-start").value);
+      var endTime = toLocalDateTime(document.getElementById("a-end").value);
+      var skuId = Number(document.getElementById("a-sku").value || 0);
+      var priceYuan = document.getElementById("a-price").value.trim();
+      var allocStock = Number(document.getElementById("a-stock").value || 0);
+      var limitPerUser = Number(document.getElementById("a-limit").value || 1);
       if (!name) { toast("请填写活动名称", "err"); return; }
-      if (!start || !end || end <= start) { toast("起止时间不合法（10001）", "err"); return; }
-      if (!stock) { toast("请填写划拨库存", "err"); return; }
-      closeModal(); toast("活动已创建，库存划拨完成", "ok");
+      if (!startTime || !endTime || endTime <= startTime) { toast("起止时间不合法（10001）", "err"); return; }
+      if (!skuId) { toast("请选择秒杀商品与 SKU", "err"); return; }
+      if (!/^\d+(\.\d{1,2})?$/.test(priceYuan) || Number(priceYuan) <= 0) { toast("请填写正确的秒杀价", "err"); return; }
+      if (allocStock <= 0) { toast("请填写划拨库存", "err"); return; }
+      if (limitPerUser <= 0) { toast("每人限购至少为 1", "err"); return; }
+      Api.post("/v1/admin/seckill/activities", {
+        name: name, startTime: startTime, endTime: endTime,
+        skus: [{ skuId: skuId, seckillPrice: Math.round(Number(priceYuan) * 100), allocStock: allocStock, limitPerUser: limitPerUser, sort: 0 }]
+      }).then(function () {
+        closeModal();
+        toast("活动已创建，库存划拨完成", "ok");
+        load();
+      }, showError);
     };
   }
 
   document.getElementById("content").innerHTML =
     "<div class=\"toolbar\"><span class=\"small faint\">秒杀库存独立划拨自普通库存，超时未支付 15 分钟自动取消并回补</span>"
-    + "<span class=\"spacer\"></span><button class=\"btn btn-primary\" id=\"create\"><i data-icon=\"plus\" data-size=\"15\"></i>新增活动</button></div>"
-    + "<div id=\"list\"></div>";
-  document.getElementById("create").onclick = create;
-  render();
+    + "<span class=\"spacer\"></span>"
+    + (canWrite ? "<button class=\"btn btn-primary\" id=\"create\"><i data-icon=\"plus\" data-size=\"15\"></i>新增活动</button>" : "<span class=\"small faint\">只读</span>")
+    + "</div><div id=\"list\"></div><div class=\"pagination\" id=\"pager\"></div>";
+
+  var createButton = document.getElementById("create");
+  if (createButton) createButton.onclick = create;
   mountIcons(document.getElementById("content"));
+  load();
 }
 </script>
 </body>

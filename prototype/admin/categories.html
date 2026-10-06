@@ -10,107 +10,244 @@
 <body>
 
 <script src="../assets/js/icons.js"></script>
-<script src="../assets/js/data.js"></script>
+<script src="../assets/js/util.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/store.js"></script>
 <script src="../assets/js/ui.js"></script>
 <script src="assets/admin-shell.js"></script>
 <script>
-if (adminShell("categories", { title: "分类与品牌", crumb: "商品", perm: "category" })) {
+if (adminShell("categories", { title: "分类与品牌", crumb: "商品", perm: "category:read" })) {
+  var canWrite = hasPerm("category:write") || hasPerm("brand:write");
+  var canWriteCategory = hasPerm("category:write");
+  var canWriteBrand = hasPerm("brand:write");
+  var tree = [];
   var expanded = {};
-  catTree().forEach(function (c) { expanded[c.id] = true; });
+  var brands = [];
+  var brandPage = 1, BRAND_SIZE = 10, brandTotal = 0, brandKeyword = "";
 
-  function treeHTML() {
-    var html = "";
-    catTree().forEach(function (l1) {
-      html += node(l1, 1, 0);
-      if (expanded[l1.id]) {
-        l1.children.forEach(function (l2) {
-          html += node(l2, 2, l1.id);
-          if (expanded[l2.id]) {
-            (l2.children || []).forEach(function (l3) { html += node(l3, 3, l2.id); });
-          }
-        });
-      }
-    });
-    return html;
+  /* ---------------- 分类 ---------------- */
+  function loadCategories() {
+    Api.get("/v1/admin/categories").then(function (data) {
+      tree = data || [];
+      if (!Object.keys(expanded).length) tree.forEach(function (c) { expanded[c.id] = true; });
+      renderTree();
+    }, showError);
   }
-  function node(c, lv, parentId) {
-    var kids = lv < 3 ? ((lv === 1 ? c.children : (c.children || [])).length) : 0;
-    var caret = lv < 3 ? "<span class=\"cat-caret " + (expanded[c.id] ? "exp" : "") + "\" data-exp=\"" + c.id + "\">›</span>" : "<span class=\"cat-caret\"></span>";
+
+  function nodeHTML(cat, level) {
+    var kids = (cat.children || []).length;
+    var caret = level < 3
+      ? "<span class=\"cat-caret " + (expanded[cat.id] ? "exp" : "") + "\" data-exp=\"" + cat.id + "\">" + (kids ? "›" : "") + "</span>"
+      : "<span class=\"cat-caret\"></span>";
+    var actions = canWriteCategory
+      ? "<div class=\"table-actions\" style=\"padding-right:10px\">"
+        + (level < 3 ? "<button class=\"btn btn-sm\" data-add=\"" + cat.id + "\">加子类</button>" : "")
+        + "<button class=\"btn btn-sm\" data-rename=\"" + cat.id + "\">改名</button>"
+        + "<button class=\"btn btn-sm\" data-visible=\"" + cat.id + "\" data-current=\"" + (cat.visible ? "1" : "0") + "\">" + (cat.visible ? "隐藏" : "显示") + "</button>"
+        + "<button class=\"btn btn-sm\" data-delcat=\"" + cat.id + "\">删除</button></div>"
+      : "";
     return "<div class=\"row g6\" style=\"border-bottom:1px solid var(--line-2)\">"
-      + "<button class=\"cat-node l" + lv + "\" style=\"flex:1\">" + caret + c.name
-      + "<span class=\"count\">" + categoryProducts(c.id, "sales").length + " 件商品</span></button>"
-      + "<div class=\"table-actions\" style=\"padding-right:10px\">"
-      + (lv < 3 ? "<button class=\"btn btn-sm\" data-add=\"" + c.id + "\">加子类</button>" : "")
-      + "<button class=\"btn btn-sm\" data-rename=\"" + c.id + "\">改名</button>"
-      + "<button class=\"btn btn-sm\" data-hide=\"" + c.id + "\">隐藏</button>"
-      + "<button class=\"btn btn-sm\" data-delcat=\"" + c.id + "\">删除</button></div></div>";
+      + "<button class=\"cat-node l" + level + "\" style=\"flex:1\">" + caret + esc(cat.name)
+      + "<span class=\"count\">" + (cat.visible ? "显示中" : "已隐藏") + " · " + (cat.path || "") + "</span></button>"
+      + actions + "</div>";
   }
 
   function renderTree() {
     var box = document.getElementById("tree");
-    box.innerHTML = treeHTML();
+    var html = "";
+    tree.forEach(function (l1) {
+      html += nodeHTML(l1, 1);
+      if (expanded[l1.id]) {
+        (l1.children || []).forEach(function (l2) {
+          html += nodeHTML(l2, 2);
+          if (expanded[l2.id]) {
+            (l2.children || []).forEach(function (l3) { html += nodeHTML(l3, 3); });
+          }
+        });
+      }
+    });
+    box.innerHTML = html || "<div class=\"empty\"><i data-icon=\"list-filter\" data-size=\"30\"></i><h4>暂无分类</h4></div>";
+    mountIcons(box);
+
     box.querySelectorAll("[data-exp]").forEach(function (t) {
       t.onclick = function (ev) { ev.stopPropagation(); var id = Number(t.dataset.exp); expanded[id] = !expanded[id]; renderTree(); };
     });
-    box.querySelectorAll("[data-add]").forEach(function (b) { b.onclick = function () { toast("新增子分类：正式实现调用 POST /api/v1/admin/categories"); }; });
+    box.querySelectorAll("[data-add]").forEach(function (b) {
+      b.onclick = function () { categoryForm(null, Number(b.dataset.add)); };
+    });
     box.querySelectorAll("[data-rename]").forEach(function (b) {
+      b.onclick = function () { categoryForm(findCategory(Number(b.dataset.rename)), 0); };
+    });
+    box.querySelectorAll("[data-visible]").forEach(function (b) {
       b.onclick = function () {
-        var c = catById(Number(b.dataset.rename));
-        openModal("<div class=\"field\"><label>分类名称</label><input class=\"input\" id=\"cn\" value=\"" + c.name + "\"></div>",
-          { title: "修改分类", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
+        var visible = b.dataset.current === "1";
+        Api.put("/v1/admin/categories/" + b.dataset.visible + "/visible?visible=" + (!visible))
+          .then(function () { toast(visible ? "已隐藏，前台不再展示" : "已显示", "ok"); loadCategories(); }, showError);
+      };
+    });
+    box.querySelectorAll("[data-delcat]").forEach(function (b) {
+      b.onclick = function () {
+        var cat = findCategory(Number(b.dataset.delcat));
+        openModal("<p>确定删除分类「" + esc(cat.name) + "」？</p><div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>有子分类或被商品引用时，后端会拒绝删除（REQ-201）。</div>",
+          { title: "删除分类", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">确认删除</button>" });
         document.getElementById("ok").onclick = function () {
-          var v = document.getElementById("cn").value.trim();
-          if (!v) { toast("分类名不能为空", "err"); return; }
-          c.name = v; closeModal(); toast("已保存", "ok"); renderTree();
+          closeModal();
+          Api.del("/v1/admin/categories/" + cat.id).then(function () { toast("分类已删除", "ok"); loadCategories(); }, showError);
         };
       };
     });
-    box.querySelectorAll("[data-hide]").forEach(function (b) { b.onclick = function () { toast("已切换显示 / 隐藏，前台即时生效"); }; });
-    box.querySelectorAll("[data-delcat]").forEach(function (b) {
+  }
+
+  function findCategory(id, nodes) {
+    nodes = nodes || tree;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === Number(id)) return nodes[i];
+      var hit = findCategory(id, nodes[i].children || []);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function categoryForm(category, parentId) {
+    var isEdit = !!category;
+    var parent = isEdit ? (findCategory(category.parentId) || null) : (parentId ? findCategory(parentId) : null);
+    openModal(
+      "<div class=\"form-grid\">"
+      + "<div class=\"field\"><label>上级分类</label><input class=\"input\" value=\"" + esc(parent ? parent.name : "（一级分类）") + "\" disabled></div>"
+      + "<div class=\"field\"><label>分类名称</label><input class=\"input\" id=\"c-name\" value=\"" + esc(isEdit ? category.name : "") + "\" placeholder=\"如 耳机音箱\"></div>"
+      + "<div class=\"field\"><label>图标标识</label><input class=\"input\" id=\"c-icon\" value=\"" + esc(isEdit ? (category.icon || "") : "") + "\" placeholder=\"选填，金刚区图标名\"></div>"
+      + "<div class=\"field\"><label>排序</label><input class=\"input\" id=\"c-sort\" value=\"" + (isEdit ? category.sort : 0) + "\" placeholder=\"数字越小越靠前\"></div>"
+      + "<label class=\"check\"><input type=\"checkbox\" id=\"c-visible\" " + (!isEdit || category.visible ? "checked" : "") + "><span>前台可见</span></label>"
+      + "<div class=\"hint\">分类最多三级；调整上级后会重算物化路径</div></div>",
+      { title: isEdit ? "修改分类" : "新增分类",
+        footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
+    document.getElementById("ok").onclick = function () {
+      var body = {
+        parentId: isEdit ? category.parentId : (parentId || 0),
+        name: document.getElementById("c-name").value.trim(),
+        icon: document.getElementById("c-icon").value.trim() || null,
+        sort: Number(document.getElementById("c-sort").value || 0),
+        visible: document.getElementById("c-visible").checked
+      };
+      if (!body.name) { toast("请填写分类名称", "err"); return; }
+      var request = isEdit ? Api.put("/v1/admin/categories/" + category.id, body) : Api.post("/v1/admin/categories", body);
+      request.then(function () { closeModal(); toast("分类已保存", "ok"); loadCategories(); }, showError);
+    };
+  }
+
+  /* ---------------- 品牌 ---------------- */
+  function loadBrands() {
+    var query = "page=" + brandPage + "&size=" + BRAND_SIZE;
+    if (brandKeyword) query += "&keyword=" + encodeURIComponent(brandKeyword);
+    Api.get("/v1/admin/brands?" + query).then(function (data) {
+      brands = data.list || [];
+      brandTotal = data.total || 0;
+      renderBrands();
+    }, showError);
+  }
+
+  function renderBrands() {
+    document.getElementById("brands").innerHTML = brands.length ? brands.map(function (b) {
+      var actions = canWriteBrand
+        ? "<button class=\"btn btn-sm\" data-bedit=\"" + b.id + "\">编辑</button>"
+          + "<button class=\"btn btn-sm\" data-benabled=\"" + b.id + "\" data-current=\"" + (b.enabled ? "1" : "0") + "\">" + (b.enabled ? "停用" : "启用") + "</button>"
+          + "<button class=\"btn btn-sm\" data-bdel=\"" + b.id + "\">删除</button>"
+        : "";
+      return "<tr><td>" + esc(b.name) + "</td><td><span class=\"tag\">" + (b.logo ? "已配置" : "LOGO") + "</span></td>"
+        + "<td class=\"num\">" + b.sort + "</td>"
+        + "<td>" + (b.enabled ? "<span class=\"pill pill-done\">启用</span>" : "<span class=\"pill pill-cancel\">停用</span>") + "</td>"
+        + "<td><div class=\"table-actions\">" + actions + "</div></td></tr>";
+    }).join("") : "<tr><td colspan=\"5\"><div class=\"empty\"><i data-icon=\"store\" data-size=\"30\"></i><h4>暂无品牌</h4></div></td></tr>";
+    document.getElementById("brandTotal").textContent = "共 " + brandTotal + " 个品牌";
+    mountIcons(document.getElementById("content"));
+
+    document.querySelectorAll("[data-bedit]").forEach(function (b) {
+      b.onclick = function () { brandForm(brands.filter(function (x) { return x.id === Number(b.dataset.bedit); })[0]); };
+    });
+    document.querySelectorAll("[data-benabled]").forEach(function (b) {
       b.onclick = function () {
-        var c = catById(Number(b.dataset.delcat));
-        var kids = DB.categories.filter(function (x) { return x.parentId === c.id; });
-        var used = categoryProducts(c.id, "sales").length;
-        if (kids.length) { toast("该分类下存在子分类，无法删除（REQ-201）", "err"); return; }
-        if (used) { toast("该分类已被 " + used + " 个商品引用，无法删除（REQ-201）", "err"); return; }
-        openModal("<p>确定删除分类「" + c.name + "」？</p>", { title: "删除分类",
-          footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">确认删除</button>" });
-        document.getElementById("ok").onclick = function () { closeModal(); toast("该分类为演示数据，未真正删除", "ok"); };
+        var enabled = b.dataset.current === "1";
+        Api.put("/v1/admin/brands/" + b.dataset.benabled + "/enabled?enabled=" + (!enabled))
+          .then(function () { toast(enabled ? "品牌已停用" : "品牌已启用", "ok"); loadBrands(); }, showError);
       };
     });
+    document.querySelectorAll("[data-bdel]").forEach(function (b) {
+      b.onclick = function () {
+        var brand = brands.filter(function (x) { return x.id === Number(b.dataset.bdel); })[0];
+        openModal("<p>确定删除品牌「" + esc(brand.name) + "」？</p><div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>被商品引用时后端会拒绝删除（REQ-202）。</div>",
+          { title: "删除品牌", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">确认删除</button>" });
+        document.getElementById("ok").onclick = function () {
+          closeModal();
+          Api.del("/v1/admin/brands/" + brand.id).then(function () { toast("品牌已删除", "ok"); loadBrands(); }, showError);
+        };
+      };
+    });
+    var pager = document.getElementById("brandPager");
+    var pages = Math.max(1, Math.ceil(brandTotal / BRAND_SIZE));
+    pager.innerHTML = pages > 1
+      ? "<button " + (brandPage === 1 ? "disabled" : "") + " data-bp=\"" + (brandPage - 1) + "\">上一页</button>"
+        + "<span class=\"small muted\">第 " + brandPage + " / " + pages + " 页</span>"
+        + "<button " + (brandPage === pages ? "disabled" : "") + " data-bp=\"" + (brandPage + 1) + "\">下一页</button>"
+      : "";
+    pager.querySelectorAll("[data-bp]").forEach(function (b) {
+      b.onclick = function () { brandPage = Number(b.dataset.bp); loadBrands(); };
+    });
+  }
+
+  function brandForm(brand) {
+    var isEdit = !!brand;
+    openModal(
+      "<div class=\"form-grid\">"
+      + "<div class=\"field\"><label>品牌名称</label><input class=\"input\" id=\"b-name\" value=\"" + esc(isEdit ? brand.name : "") + "\" placeholder=\"如 百益严选\"></div>"
+      + "<div class=\"field\"><label>LOGO URL</label><input class=\"input\" id=\"b-logo\" value=\"" + esc(isEdit ? (brand.logo || "") : "") + "\" placeholder=\"选填\"></div>"
+      + "<div class=\"field\"><label>品牌介绍</label><textarea class=\"textarea\" id=\"b-desc\" rows=\"3\" placeholder=\"选填，500 字以内\">" + esc(isEdit ? (brand.description || "") : "") + "</textarea></div>"
+      + "<div class=\"field\"><label>排序</label><input class=\"input\" id=\"b-sort\" value=\"" + (isEdit ? brand.sort : 0) + "\"></div>"
+      + "<label class=\"check\"><input type=\"checkbox\" id=\"b-enabled\" " + (!isEdit || brand.enabled ? "checked" : "") + "><span>启用</span></label></div>",
+      { title: isEdit ? "编辑品牌" : "新增品牌",
+        footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
+    document.getElementById("ok").onclick = function () {
+      var body = {
+        name: document.getElementById("b-name").value.trim(),
+        logo: document.getElementById("b-logo").value.trim() || null,
+        description: document.getElementById("b-desc").value.trim() || null,
+        sort: Number(document.getElementById("b-sort").value || 0),
+        enabled: document.getElementById("b-enabled").checked
+      };
+      if (!body.name) { toast("请填写品牌名称", "err"); return; }
+      var request = isEdit ? Api.put("/v1/admin/brands/" + brand.id, body) : Api.post("/v1/admin/brands", body);
+      request.then(function () { closeModal(); toast("品牌已保存", "ok"); loadBrands(); }, showError);
+    };
   }
 
   document.getElementById("content").innerHTML =
     "<div style=\"display:grid;grid-template-columns:1.15fr 1fr;gap:12px;align-items:start\">"
     + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"list-filter\" data-size=\"16\"></i>分类树（最多 3 级）</h3>"
-    + "<button class=\"btn btn-primary btn-sm\" id=\"addTop\"><i data-icon=\"plus\" data-size=\"14\"></i>新增一级分类</button></div>"
-    + "<div class=\"panel-body flush\" id=\"tree\"></div></div>"
+    + (canWriteCategory ? "<button class=\"btn btn-primary btn-sm\" id=\"addTop\"><i data-icon=\"plus\" data-size=\"14\"></i>新增一级分类</button>" : "")
+    + "</div><div class=\"panel-body flush\" id=\"tree\"></div></div>"
     + "<div class=\"panel\"><div class=\"panel-head\"><h3><i data-icon=\"store\" data-size=\"16\"></i>品牌管理</h3>"
-    + "<button class=\"btn btn-primary btn-sm\" id=\"addBrand\"><i data-icon=\"plus\" data-size=\"14\"></i>新增品牌</button></div>"
-    + "<div class=\"panel-body flush table-wrap\"><table class=\"table\"><thead><tr><th>品牌</th><th>LOGO</th><th class=\"num\">商品数</th><th>状态</th><th>操作</th></tr></thead><tbody id=\"brands\"></tbody></table></div></div>"
+    + "<div class=\"inline\"><span class=\"small faint\" id=\"brandTotal\"></span>"
+    + (canWriteBrand ? "<button class=\"btn btn-primary btn-sm\" id=\"addBrand\"><i data-icon=\"plus\" data-size=\"14\"></i>新增品牌</button>" : "")
+    + "</div></div>"
+    + "<div class=\"panel-body\"><div class=\"toolbar\"><input class=\"input\" id=\"brandKw\" placeholder=\"品牌名称\">"
+    + "<button class=\"btn\" id=\"brandSearch\"><i data-icon=\"search\" data-size=\"15\"></i>查询</button></div>"
+    + "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>品牌</th><th>LOGO</th><th class=\"num\">排序</th><th>状态</th><th>操作</th></tr></thead><tbody id=\"brands\"></tbody></table></div>"
+    + "<div class=\"pagination\" id=\"brandPager\"></div></div></div>"
     + "</div>"
     + "<div class=\"alert alert-plain mt12\"><i data-icon=\"info\" data-size=\"15\"></i>分类是前台分类浏览与首页楼层的共同数据源；删除含子分类或被商品引用的分类会被拒绝。</div>";
 
-  document.getElementById("brands").innerHTML = DB.brands.map(function (b) {
-    var n = DB.products.filter(function (p) { return p.brandId === b.id; }).length;
-    return "<tr><td>" + b.name + "</td><td><span class=\"tag\">LOGO</span></td><td class=\"num\">" + n + "</td>"
-      + "<td><span class=\"pill pill-done\">启用</span></td>"
-      + "<td><div class=\"table-actions\"><button class=\"btn btn-sm\" data-bedit=\"" + b.id + "\">编辑</button>"
-      + "<button class=\"btn btn-sm\" data-bdel=\"" + b.id + "\">删除</button></div></td></tr>";
-  }).join("");
-  document.querySelectorAll("[data-bdel]").forEach(function (b) {
-    b.onclick = function () {
-      var id = Number(b.dataset.bdel);
-      var n = DB.products.filter(function (p) { return p.brandId === id; }).length;
-      if (n) { toast("该品牌已被 " + n + " 个商品引用，不可删除（REQ-202）", "err"); return; }
-      toast("品牌已删除", "ok");
-    };
-  });
-  document.querySelectorAll("[data-bedit]").forEach(function (b) { b.onclick = function () { toast("编辑品牌：正式实现调用品牌更新接口"); }; });
-  document.getElementById("addTop").onclick = function () { toast("新增一级分类：正式实现校验最多 3 级"); };
-  document.getElementById("addBrand").onclick = function () { toast("新增品牌：正式实现走 /api/v1/admin/brands"); };
-  renderTree();
+  var addTop = document.getElementById("addTop");
+  if (addTop) addTop.onclick = function () { categoryForm(null, 0); };
+  var addBrand = document.getElementById("addBrand");
+  if (addBrand) addBrand.onclick = function () { brandForm(null); };
+  document.getElementById("brandSearch").onclick = function () {
+    brandKeyword = document.getElementById("brandKw").value.trim();
+    brandPage = 1;
+    loadBrands();
+  };
   mountIcons(document.getElementById("content"));
+
+  loadCategories();
+  loadBrands();
 }
 </script>
 </body>

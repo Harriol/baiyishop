@@ -20,13 +20,13 @@
 <div class="card mt12" style="padding:0">
   <a class="order-line" href="orders.html?status=PENDING_PAYMENT" style="align-items:center">
     <i data-icon="credit-card" data-size="18" style="color:var(--price)"></i><span class="grow">待付款</span>
-    <span class="pill pill-pay" id="c-pay"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+    <span class="pill pill-pay" id="c-pay">0</span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
   <a class="order-line" href="orders.html?status=PENDING_SHIPMENT" style="align-items:center">
     <i data-icon="package" data-size="18" style="color:var(--warn)"></i><span class="grow">待发货</span>
-    <span class="pill pill-ship" id="c-ship"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+    <span class="pill pill-ship" id="c-ship">0</span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
   <a class="order-line" href="orders.html?status=PENDING_RECEIPT" style="align-items:center">
     <i data-icon="truck" data-size="18" style="color:#2b5fbd"></i><span class="grow">待收货</span>
-    <span class="pill pill-recv" id="c-recv"></span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
+    <span class="pill pill-recv" id="c-recv">0</span><i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
   <a class="order-line" href="orders.html" style="align-items:center">
     <i data-icon="list-filter" data-size="18" style="color:var(--ink-2)"></i><span class="grow">全部订单</span>
     <i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
@@ -40,30 +40,55 @@
     <i data-icon="chevron-right" data-size="16" style="color:var(--ink-3)"></i></a>
 </div>
 <div class="card mt12 between" style="flex-wrap:wrap;gap:10px">
-  <span class="small faint">当前为原型演示，跳过后台与小程序端</span>
+  <span class="small faint">前台页面已接入网关接口（/api/v1），小程序端复用同一套接口</span>
   <button class="btn" id="logout"><i data-icon="log-out" data-size="15"></i>退出登录</button>
 </div>
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
-var u = DB.user;
-document.getElementById("avatar").textContent = u.avatarText;
-document.getElementById("nick").textContent = u.nickname;
-document.getElementById("level").textContent = u.memberLevel;
-document.getElementById("phone").textContent = u.phone.slice(0, 3) + "****" + u.phone.slice(7);
-document.getElementById("uid").textContent = u.id;
-document.getElementById("addrCount").textContent = DB.addresses.length + " 个地址";
-function cnt(s) { return DB.orders.filter(function (o) { return o.status === s; }).length; }
-document.getElementById("c-pay").textContent = cnt("PENDING_PAYMENT");
-document.getElementById("c-ship").textContent = cnt("PENDING_SHIPMENT");
-document.getElementById("c-recv").textContent = cnt("PENDING_RECEIPT");
-document.getElementById("edit").onclick = function () { toast("原型中资料编辑未展开，实际由 REQ-104 接口实现"); };
-document.getElementById("logout").onclick = function () { location.href = "login.html"; };
-mountIcons(document);
+
+function countOf(status) {
+  return Api.get("/v1/orders?status=" + status + "&page=1&size=1", { silent: true })
+    .then(function (page) { return page.total || 0; }, function () { return 0; });
+}
+
+function load() {
+  Api.profile().then(function (user) {
+    document.getElementById("avatar").textContent = (user.nickname || user.username || "U").slice(0, 1).toUpperCase();
+    document.getElementById("nick").textContent = user.nickname || user.username || "—";
+    document.getElementById("level").textContent = "普通会员";
+    document.getElementById("phone").textContent = user.phone || "未绑定手机号";
+    document.getElementById("uid").textContent = user.id;
+  }, showError);
+
+  Promise.all([countOf("PENDING_PAYMENT"), countOf("PENDING_SHIPMENT"), countOf("PENDING_RECEIPT")]).then(function (counts) {
+    document.getElementById("c-pay").textContent = counts[0];
+    document.getElementById("c-ship").textContent = counts[1];
+    document.getElementById("c-recv").textContent = counts[2];
+  });
+
+  Api.get("/v1/addresses", { silent: true }).then(function (list) {
+    document.getElementById("addrCount").textContent = (list || []).length + " 个地址";
+  }, function () { /* 地址拉取失败时不显示数量 */ });
+}
+
+document.getElementById("edit").onclick = function () {
+  toast("资料编辑不在本期接口范围，REQ-104 仅提供资料查询");
+};
+document.getElementById("logout").onclick = function () {
+  Api.logout().then(function () {
+    toast("已退出登录", "ok");
+    setTimeout(function () { location.href = "index.html"; }, 600);
+  });
+};
+
+if (requireLogin()) load();
 </script>
 </body>
 </html>

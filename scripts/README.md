@@ -58,4 +58,32 @@ powershell ... -OnlyPrepare                       # 只造数据（1000 用户 +
 | `run-load-test.ps1` | 编排上述步骤，产出 JTL + JMeter HTML 报告到 `docs/load-test/` |
 
 JMeter 需要单独安装（默认路径 `D:\tools_app\apache-jmeter-5.6.3`，用 `-JmeterHome` 覆盖）。
+
+## 前端联调（原型页面 → 真实网关）
+
+`prototype/` 下的 30 个页面已**全部接入真实接口**（不再使用 mock 数据），通过 Vite 开发服务器的
+`/api` 代理访问网关，因此本地没有跨域问题、后端也不用开 CORS。
+
+```powershell
+# 1) 起后端：中间件已在跑时用 -SkipMiddleware；跑完保持运行
+powershell -ExecutionPolicy Bypass -File scripts/smoke-all.ps1 -SkipBuild -SkipMiddleware -Only None -KeepRunning
+
+# 2) 起前端（首次需要 npm install）
+cd prototype
+npm install
+npm run dev            # http://localhost:5173
+```
+
+| 入口 | 地址 | 说明 |
+| --- | --- | --- |
+| 用户端 Web | http://localhost:5173/index.html | 需自行注册账号（注册即登录） |
+| 运营后台 | http://localhost:5173/admin/login.html | `smokeadmin / Admin@2026`（超管）、`check_service / Admin@2026`（客服，仅查单 + 备注） |
+| 小程序原型 | http://localhost:5173/miniapp/index.html | 点「我的 → 微信授权登录」走 `MockWechatAuthClient`，code 即 openid |
+
+要点：
+
+- 前台与后台**分开存会话**（`baiyi.*` 与 `baiyi.admin.*`），同一个浏览器可同时登录买家与管理员。
+- 接口金额一律为「分」，展示换算在前端（`Store.money()`）；图片地址为 MinIO 示例地址时会回退到本地占位图。
+- 首页内容是后台「首页配置」里维护的：刚清过库时首页为空态，先在后台加轮播 / 金刚区 / 楼层。
+- 生产/同域部署时把 `window.BAIYI_API_BASE` 设为网关地址，或反代 `/api` 到网关即可（无需改代码）。
 注意：压测器与被测服务在同一台机器时会互相抢资源，容量结论必须在环境分离后重测。

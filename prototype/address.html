@@ -18,67 +18,99 @@
 </main>
 
 <script src="assets/js/icons.js"></script>
-<script src="assets/js/data.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
 <script src="assets/js/ui.js"></script>
 <script>
 pageInit("category");
+
+var addresses = [];
+
 function render() {
   var box = document.getElementById("list");
-  if (!DB.addresses.length) {
+  if (!addresses.length) {
     box.innerHTML = "<div class=\"empty\"><i data-icon=\"map-pin\" data-size=\"36\"></i><h4>还没有收货地址</h4><p class=\"small\">添加一个地址，下单更方便</p></div>";
-    mountIcons(box); return;
+    mountIcons(box);
+    return;
   }
-  box.innerHTML = DB.addresses.map(function (a) {
+  box.innerHTML = addresses.map(function (a) {
     return "<div class=\"card\" style=\"padding:14px\"><div class=\"between\" style=\"flex-wrap:wrap;gap:10px\">"
-      + "<div><div class=\"row g8\"><span class=\"strong\">" + a.receiverName + "</span><span class=\"muted small\">" + a.receiverPhone + "</span>"
+      + "<div><div class=\"row g8\"><span class=\"strong\">" + esc(a.receiverName) + "</span><span class=\"muted small\">" + esc(a.receiverPhone) + "</span>"
       + (a.isDefault ? "<span class=\"tag tag-brand\">默认</span>" : "") + "</div>"
-      + "<div class=\"small muted mt8\">" + a.province + a.city + a.district + " " + a.detail + "</div></div>"
+      + "<div class=\"small muted mt8\">" + esc(a.province + a.city + a.district + " " + a.detail) + "</div></div>"
       + "<div class=\"row g6\">"
       + (a.isDefault ? "" : "<button class=\"btn btn-sm\" data-def=\"" + a.id + "\">设为默认</button>")
       + "<button class=\"btn btn-sm\" data-edit=\"" + a.id + "\"><i data-icon=\"pencil\" data-size=\"14\"></i>编辑</button>"
       + "<button class=\"btn btn-sm\" data-del=\"" + a.id + "\"><i data-icon=\"trash-2\" data-size=\"14\"></i>删除</button></div></div></div>";
   }).join("");
   mountIcons(box);
-  box.querySelectorAll("[data-def]").forEach(function (b) { b.onclick = function () {
-    DB.addresses.forEach(function (a) { a.isDefault = a.id === Number(b.dataset.def); }); toast("已设为默认地址", "ok"); render(); }; });
-  box.querySelectorAll("[data-edit]").forEach(function (b) { b.onclick = function () { form(DB.addresses.filter(function (a) { return a.id === Number(b.dataset.edit); })[0]); }; });
-  box.querySelectorAll("[data-del]").forEach(function (b) { b.onclick = function () {
-    var id = Number(b.dataset.del);
-    openModal("<p>确定删除该收货地址？</p>", { title: "删除地址", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">删除</button>" });
-    document.getElementById("ok").onclick = function () { DB.addresses = DB.addresses.filter(function (a) { return a.id !== id; }); closeModal(); toast("已删除", "ok"); render(); };
-  }; });
+
+  box.querySelectorAll("[data-def]").forEach(function (b) {
+    b.onclick = function () {
+      Api.put("/v1/addresses/" + b.dataset.def + "/default").then(function () { toast("已设为默认地址", "ok"); load(); }, showError);
+    };
+  });
+  box.querySelectorAll("[data-edit]").forEach(function (b) {
+    b.onclick = function () { form(addresses.filter(function (a) { return a.id === Number(b.dataset.edit); })[0]); };
+  });
+  box.querySelectorAll("[data-del]").forEach(function (b) {
+    b.onclick = function () {
+      var id = Number(b.dataset.del);
+      openModal("<p>确定删除该收货地址？</p>", { title: "删除地址",
+        footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-price\" id=\"ok\">删除</button>" });
+      document.getElementById("ok").onclick = function () {
+        closeModal();
+        Api.del("/v1/addresses/" + id).then(function () { toast("已删除", "ok"); load(); }, showError);
+      };
+    };
+  });
 }
-function form(a) {
-  a = a || { id: 0, receiverName: "", receiverPhone: "", province: "", city: "", district: "", detail: "", isDefault: false };
+
+function form(address) {
+  var a = address || { id: 0, receiverName: "", receiverPhone: "", province: "", city: "", district: "", detail: "", isDefault: false };
   openModal(
     "<div style=\"display:grid;gap:12px\">"
-    + "<div class=\"field\"><label>收货人</label><input class=\"input\" id=\"f-name\" value=\"" + a.receiverName + "\" placeholder=\"请输入收货人姓名\"></div>"
-    + "<div class=\"field\"><label>手机号</label><input class=\"input\" id=\"f-phone\" value=\"" + a.receiverPhone + "\" placeholder=\"11 位手机号\"></div>"
+    + "<div class=\"field\"><label>收货人</label><input class=\"input\" id=\"f-name\" value=\"" + esc(a.receiverName) + "\" placeholder=\"请输入收货人姓名\"></div>"
+    + "<div class=\"field\"><label>手机号</label><input class=\"input\" id=\"f-phone\" value=\"" + esc(a.receiverPhone) + "\" placeholder=\"11 位手机号\">"
+    + (String(a.receiverPhone).indexOf("*") >= 0 ? "<div class=\"hint\">为保护隐私列表返回的是脱敏号码，保存前请重新输入完整手机号</div>" : "") + "</div>"
     + "<div style=\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px\">"
-    + "<div class=\"field\"><label>省</label><input class=\"input\" id=\"f-prov\" value=\"" + a.province + "\"></div>"
-    + "<div class=\"field\"><label>市</label><input class=\"input\" id=\"f-city\" value=\"" + a.city + "\"></div>"
-    + "<div class=\"field\"><label>区 / 县</label><input class=\"input\" id=\"f-dist\" value=\"" + a.district + "\"></div></div>"
-    + "<div class=\"field\"><label>详细地址</label><input class=\"input\" id=\"f-detail\" value=\"" + a.detail + "\" placeholder=\"街道、门牌号\"></div>"
+    + "<div class=\"field\"><label>省</label><input class=\"input\" id=\"f-prov\" value=\"" + esc(a.province) + "\" placeholder=\"如 广东省\"></div>"
+    + "<div class=\"field\"><label>市</label><input class=\"input\" id=\"f-city\" value=\"" + esc(a.city) + "\" placeholder=\"如 深圳市\"></div>"
+    + "<div class=\"field\"><label>区 / 县</label><input class=\"input\" id=\"f-dist\" value=\"" + esc(a.district) + "\" placeholder=\"如 南山区\"></div></div>"
+    + "<div class=\"field\"><label>详细地址</label><input class=\"input\" id=\"f-detail\" value=\"" + esc(a.detail) + "\" placeholder=\"街道、门牌号\"></div>"
     + "<label class=\"check\"><input type=\"checkbox\" id=\"f-def\" " + (a.isDefault ? "checked" : "") + "><span>设为默认地址</span></label></div>",
     { title: a.id ? "编辑地址" : "新增地址",
       footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
   document.getElementById("ok").onclick = function () {
-    var name = document.getElementById("f-name").value.trim();
-    var phone = document.getElementById("f-phone").value.trim();
-    if (!name) { toast("请填写收货人", "err"); return; }
-    if (!/^1\d{10}$/.test(phone)) { toast("手机号格式不正确", "err"); return; }
-    if (!document.getElementById("f-detail").value.trim()) { toast("请填写详细地址", "err"); return; }
-    var isDef = document.getElementById("f-def").checked;
-    if (isDef) DB.addresses.forEach(function (x) { x.isDefault = false; });
-    var payload = { receiverName: name, receiverPhone: phone, province: document.getElementById("f-prov").value.trim(),
-      city: document.getElementById("f-city").value.trim(), district: document.getElementById("f-dist").value.trim(),
-      detail: document.getElementById("f-detail").value.trim(), isDefault: isDef };
-    if (a.id) { Object.assign(a, payload); } else { payload.id = Date.now(); DB.addresses.push(payload); }
-    closeModal(); toast("地址已保存", "ok"); render();
+    var payload = {
+      receiverName: document.getElementById("f-name").value.trim(),
+      receiverPhone: document.getElementById("f-phone").value.trim(),
+      province: document.getElementById("f-prov").value.trim(),
+      city: document.getElementById("f-city").value.trim(),
+      district: document.getElementById("f-dist").value.trim(),
+      detail: document.getElementById("f-detail").value.trim(),
+      isDefault: document.getElementById("f-def").checked
+    };
+    if (!payload.receiverName) { toast("请填写收货人", "err"); return; }
+    if (!/^1[3-9]\d{9}$/.test(payload.receiverPhone)) { toast("请填写完整正确的手机号", "err"); return; }
+    if (!payload.province || !payload.city || !payload.district) { toast("请填写完整的省 / 市 / 区", "err"); return; }
+    if (!payload.detail) { toast("请填写详细地址", "err"); return; }
+    var request = a.id ? Api.put("/v1/addresses/" + a.id, payload) : Api.post("/v1/addresses", payload);
+    request.then(function () { closeModal(); toast("地址已保存", "ok"); load(); }, showError);
   };
 }
+
+function load() {
+  Api.get("/v1/addresses").then(function (list) {
+    addresses = list || [];
+    render();
+  }, showError);
+}
+
 document.getElementById("add").onclick = function () { form(null); };
-render();
+
+if (requireLogin()) load(); else render();
 </script>
 </body>
 </html>
