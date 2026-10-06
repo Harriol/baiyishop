@@ -45,3 +45,6 @@ deploy/elasticsearch/*.zip
 !.env.example
 # 各服务的本地配置（含数据库口令），由 deploy/generate-local-config.ps1 生成
 application-local.yaml
+
+### 压测运行时产物（JMeter 会在工作目录留下日志；JTL 与 HTML 报告落在 docs/load-test，本地保留）###
+jmeter.log
