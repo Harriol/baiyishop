@@ -12,5 +12,6 @@ public class PaymentApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(PaymentApplication.class, args);
+        System.out.println("支付服务启动(*´▽｀)ノノ");
     }
 }
