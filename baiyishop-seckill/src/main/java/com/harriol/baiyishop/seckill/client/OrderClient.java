@@ -2,6 +2,7 @@ package com.harriol.baiyishop.seckill.client;
 
 import com.harriol.baiyishop.common.web.client.InternalApiClient;
 import com.harriol.baiyishop.common.web.client.InternalApiClients;
+import com.harriol.baiyishop.common.core.result.ErrorCode;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,7 +23,10 @@ public class OrderClient {
 
     /** 按票据查订单号；没有订单返回 empty */
     public String orderNoOfTicket(String ticketId) {
-        return client.getOptional("/internal/orders/by-ticket/" + ticketId, TicketOrderView.class)
+        // 订单服务的约定是「没有对应订单返回 50001」，必须把它声明为「允许为空」，
+        // 否则对账任务会在这里抛异常，导致「预扣成功但没落单」的票据永远停在 QUEUED、库存不回收
+        return client.getOptional("/internal/orders/by-ticket/" + ticketId, TicketOrderView.class,
+                        ErrorCode.ORDER_NOT_FOUND.getCode())
                 .map(TicketOrderView::orderNo)
                 .orElse(null);
     }
