@@ -255,6 +255,9 @@ public class InventoryService {
      * 三种操作的公共骨架：幂等 → 条件更新 → 写流水 → 联动预警。
      * <p>先按 biz_key 查一次做快速幂等；随后的插入仍可能撞唯一索引（并发重复请求），
      * 在调用处捕获 DuplicateKeyException 兜底。
+     * <p><b>释放（UNLOCK）是尽力而为</b>：订单侧的取消 / 超时取消不能因为「没有锁定量可释放」而失败 ——
+     * 例如订单引用的 SKU 已被清理、或锁定量早被别的路径释放过。这种情况下按「已释放」处理并留告警，
+     * 否则 Seata 全局事务回滚，订单会永远卡在待付款、兜底任务每分钟重试一次。
      */
     private StockOpResult applyOperation(String orderNo, String type, Long productId, List<StockItem> items) {
         String bizKey = orderNo + ":" + type;
@@ -266,13 +269,25 @@ public class InventoryService {
 
         List<Long> failed = new ArrayList<>();
         for (StockItem item : items) {
-            Inventory inventory = getOrCreate(item.skuId(), productId);
+            boolean release = InventoryFlow.TYPE_UNLOCK.equals(type);
+            Inventory inventory = release ? findExisting(item.skuId()) : getOrCreate(item.skuId(), productId);
+            if (inventory == null) {
+                // 释放时才可能出现：连库存记录都没有，说明这笔订单从来没有锁定过库存
+                log.warn("释放库存跳过：无库存记录 bizKey={} skuId={} quantity={}", bizKey, item.skuId(), item.quantity());
+                continue;
+            }
             int rows = switch (type) {
                 case InventoryFlow.TYPE_LOCK -> inventoryMapper.lock(item.skuId(), item.quantity());
                 case InventoryFlow.TYPE_DEDUCT -> inventoryMapper.deduct(item.skuId(), item.quantity());
                 default -> inventoryMapper.release(item.skuId(), item.quantity());
             };
             if (rows == 0) {
+                if (release) {
+                    // 锁定量不足：没有可释放的库存，按已释放处理（不写流水，因为没有任何变更）
+                    log.warn("释放库存跳过：可释放量不足 bizKey={} skuId={} quantity={} locked={}",
+                            bizKey, item.skuId(), item.quantity(), inventory.getLocked());
+                    continue;
+                }
                 failed.add(item.skuId());
                 continue;
             }
@@ -425,6 +440,14 @@ public class InventoryService {
             return inventoryMapper.selectOne(Wrappers.<Inventory>lambdaQuery().eq(Inventory::getSkuId, skuId));
         }
         return created;
+    }
+
+    /** 只查不建：SKU 从没建过库存记录时返回 null（释放场景用它，避免留下 0/0 的幽灵行） */
+    private Inventory findExisting(Long skuId) {
+        if (skuId == null || skuId <= 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "SKU 不存在");
+        }
+        return inventoryMapper.selectOne(Wrappers.<Inventory>lambdaQuery().eq(Inventory::getSkuId, skuId));
     }
 
     /** 写流水。before 由 after 与本次变更量反推，避免读到事务内的旧快照 */

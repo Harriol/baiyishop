@@ -20,6 +20,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * 库存服务端到端验证（REQ-501 ~ REQ-503、REQ-505）。
@@ -88,6 +89,14 @@ class InventoryApiTests {
     private JsonNode inventoryOf(long skuId) throws Exception {
         return send("GET", "/api/v1/admin/inventory?page=1&size=10&skuId=" + skuId, null, operatorToken)
                 .json().get("data").get("list").get(0);
+    }
+
+    /** 按 SKU 查库存行，查不到返回 null */
+    private JsonNode inventoryOrNull(long skuId) throws Exception {
+        return send("GET", "/api/v1/admin/inventory?page=1&size=10&skuId=" + skuId, null, operatorToken)
+                .json().get("data").get("list").isEmpty() ? null
+                : send("GET", "/api/v1/admin/inventory?page=1&size=10&skuId=" + skuId, null, operatorToken)
+                        .json().get("data").get("list").get(0);
     }
 
     private Resp lock(long skuId, int qty, String no) throws Exception {
@@ -232,6 +241,25 @@ class InventoryApiTests {
 
         JsonNode inv = inventoryOf(skuId);
         assertThat(inv.get("available").asInt()).isEqualTo(30);
+        assertThat(inv.get("locked").asInt()).isZero();
+    }
+
+    @Test
+    @DisplayName("释放从未锁定过的订单：按已释放处理（不报 40001），也不留 0/0 的幽灵库存行")
+    void releaseWithoutLockIsNoop() throws Exception {
+        long skuId = newSkuId();   // 只有 SKU，没有库存记录
+        assertThat(send("POST", "/internal/inventory/release",
+                "{\"orderNo\":\"" + orderNo() + "\",\"items\":[{\"skuId\":" + skuId + ",\"quantity\":1}]}", null)
+                .json().get("code").asInt()).isZero();
+        assertThatCode(() -> assertThat(inventoryOrNull(skuId)).isNull()).doesNotThrowAnyException();
+
+        // 有库存记录但锁定量为 0 时同样按已释放处理
+        long stocked = skuWithStock(5);
+        assertThat(send("POST", "/internal/inventory/release",
+                "{\"orderNo\":\"" + orderNo() + "\",\"items\":[{\"skuId\":" + stocked + ",\"quantity\":1}]}", null)
+                .json().get("code").asInt()).isZero();
+        JsonNode inv = inventoryOf(stocked);
+        assertThat(inv.get("available").asInt()).isEqualTo(5);
         assertThat(inv.get("locked").asInt()).isZero();
     }
 
