@@ -14,6 +14,6 @@ public class UserApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(UserApplication.class, args);
-        System.out.println("用户服务启动(*´▽｀)ノノ");
+        System.out.println("————————————————————用户服务启动(*´▽｀)ノノ————————————————————");
     }
 }

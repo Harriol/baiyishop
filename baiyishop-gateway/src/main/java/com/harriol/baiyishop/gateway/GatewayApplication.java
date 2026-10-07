@@ -12,6 +12,6 @@ public class GatewayApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(GatewayApplication.class, args);
-        System.out.println("API网关服务启动(*´▽｀)ノノ");
+        System.out.println("————————————————————API网关服务启动(*´▽｀)ノノ————————————————————");
     }
 }

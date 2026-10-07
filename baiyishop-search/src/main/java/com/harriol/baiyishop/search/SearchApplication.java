@@ -12,6 +12,6 @@ public class SearchApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(SearchApplication.class, args);
-        System.out.println("搜索服务启动(*´▽｀)ノノ");
+        System.out.println("————————————————————搜索服务启动(*´▽｀)ノノ————————————————————");
     }
 }
