@@ -33,6 +33,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -307,7 +308,8 @@ public class InventoryService {
 
     // ==================== 后台：查询 / 调整 / 预警 ====================
 
-    public PageResult<InventoryItem> page(long page, long size, Long skuId, Long productId, Boolean onlyAlert) {
+    public PageResult<InventoryItem> page(long page, long size, Long skuId, Long productId,
+                                          Collection<Long> productIds, Boolean onlyAlert) {
         List<Long> alertSkuIds = alertMapper.selectList(Wrappers.<StockAlert>lambdaQuery()
                         .eq(StockAlert::getStatus, StockAlert.STATUS_OPEN))
                 .stream().map(StockAlert::getSkuId).toList();
@@ -316,6 +318,7 @@ public class InventoryService {
         var query = Wrappers.<Inventory>lambdaQuery()
                 .eq(skuId != null, Inventory::getSkuId, skuId)
                 .eq(productId != null, Inventory::getProductId, productId)
+                .in(productIds != null && !productIds.isEmpty(), Inventory::getProductId, productIds)
                 .orderByAsc(Inventory::getSkuId);
         if (Boolean.TRUE.equals(onlyAlert)) {
             if (alertSkuIds.isEmpty()) {
@@ -333,10 +336,25 @@ public class InventoryService {
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), items);
     }
 
-    public PageResult<InventoryFlowItem> flows(long page, long size, Long skuId, String type) {
+    public PageResult<InventoryFlowItem> flows(long page, long size, Long skuId,
+                                               Collection<Long> productIds, String type) {
+        List<Long> productSkuIds = null;
+        if (productIds != null) {
+            if (productIds.isEmpty()) {
+                return PageResult.empty(page, size);
+            }
+            productSkuIds = inventoryMapper.selectList(Wrappers.<Inventory>lambdaQuery()
+                            .in(Inventory::getProductId, productIds))
+                    .stream().map(Inventory::getSkuId).toList();
+            if (productSkuIds.isEmpty()) {
+                return PageResult.empty(page, size);
+            }
+        }
+
         Page<InventoryFlow> pager = new Page<>(page, size);
         Page<InventoryFlow> result = flowMapper.selectPage(pager, Wrappers.<InventoryFlow>lambdaQuery()
                 .eq(skuId != null, InventoryFlow::getSkuId, skuId)
+                .in(productSkuIds != null, InventoryFlow::getSkuId, productSkuIds)
                 .eq(StringUtils.hasText(type), InventoryFlow::getType, type)
                 .orderByDesc(InventoryFlow::getId));
         List<InventoryFlowItem> items = result.getRecords().stream()
@@ -346,6 +364,56 @@ public class InventoryService {
                         f.getOperatorType(), f.getOperatorId(), f.getCreatedAt()))
                 .toList();
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), items);
+    }
+
+    /** 初始化 SKU 库存记录，供新增商品或历史缺档商品补录。 */
+    @Transactional
+    public InventoryItem initialize(Long skuId, Long productId, int initialAvailable, Long operatorId) {
+        if (initialAvailable < 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "初始库存不能为负数");
+        }
+        if (skuId == null || skuId <= 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "SKU 不存在");
+        }
+
+        Inventory inventory = findExisting(skuId);
+        boolean created = false;
+        if (inventory == null) {
+            Inventory initial = new Inventory();
+            initial.setSkuId(skuId);
+            initial.setProductId(productId == null ? 0L : productId);
+            initial.setAvailable(initialAvailable);
+            initial.setLocked(0);
+            initial.setWarnThreshold(DEFAULT_WARN_THRESHOLD);
+            initial.setVersion(0);
+            initial.setUpdatedAt(LocalDateTime.now());
+            try {
+                inventoryMapper.insert(initial);
+                inventory = initial;
+                created = true;
+            } catch (DuplicateKeyException ex) {
+                inventory = findExisting(skuId);
+            }
+        }
+
+        if (inventory == null) {
+            throw new BizException(ErrorCode.SYSTEM_ERROR, "库存初始化失败，请重试");
+        }
+        if (productId != null && productId > 0
+                && (inventory.getProductId() == null || inventory.getProductId() <= 0)) {
+            inventory.setProductId(productId);
+            inventoryMapper.updateById(inventory);
+        }
+
+        if (created && initialAvailable > 0) {
+            Inventory after = inventoryMapper.selectById(inventory.getId());
+            writeAdjustFlow("INIT:" + skuId, skuId, initialAvailable, after, "新增商品初始库存", operatorId);
+            inventory = after;
+        }
+        refreshAlert(inventory);
+        return new InventoryItem(inventory.getSkuId(), inventory.getProductId(), inventory.getAvailable(),
+                inventory.getLocked(), inventory.getWarnThreshold(),
+                inventory.getAvailable() <= inventory.getWarnThreshold(), inventory.getUpdatedAt());
     }
 
     /** 后台调整库存（REQ-501）：正数补货、负数减库，调整后不能为负 */
@@ -423,6 +491,11 @@ public class InventoryService {
         Inventory inventory = inventoryMapper.selectOne(
                 Wrappers.<Inventory>lambdaQuery().eq(Inventory::getSkuId, skuId));
         if (inventory != null) {
+            if (productId != null && productId > 0
+                    && (inventory.getProductId() == null || inventory.getProductId() <= 0)) {
+                inventory.setProductId(productId);
+                inventoryMapper.updateById(inventory);
+            }
             return inventory;
         }
         Inventory created = new Inventory();

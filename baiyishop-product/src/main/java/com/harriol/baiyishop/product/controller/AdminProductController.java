@@ -6,7 +6,9 @@ import com.harriol.baiyishop.common.security.annotation.RequiresRole;
 import com.harriol.baiyishop.product.dto.ProductAdminItem;
 import com.harriol.baiyishop.product.dto.ProductDetailResponse;
 import com.harriol.baiyishop.product.dto.ProductRequest;
+import com.harriol.baiyishop.product.dto.ProductSkuSnapshot;
 import com.harriol.baiyishop.product.service.ProductService;
+import com.harriol.baiyishop.product.service.ProductSnapshotService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +31,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminProductController {
 
     private final ProductService productService;
+    private final ProductSnapshotService snapshotService;
 
-    public AdminProductController(ProductService productService) {
+    public AdminProductController(ProductService productService, ProductSnapshotService snapshotService) {
         this.productService = productService;
+        this.snapshotService = snapshotService;
     }
 
     /** 商品分页列表 */
@@ -44,6 +48,12 @@ public class AdminProductController {
             @RequestParam(required = false) Long brandId,
             @RequestParam(required = false) String status) {
         return Result.ok(productService.page(page, size, keyword, categoryId, brandId, status));
+    }
+
+    /** SKU 快照：库存管理页用 SKU 反查商品，兼容历史 product_id=0 的库存记录 */
+    @GetMapping("/skus/{skuId}")
+    public Result<ProductSkuSnapshot> sku(@PathVariable Long skuId) {
+        return Result.ok(snapshotService.skuSnapshot(skuId));
     }
 
     /** 商品详情（含 SKU 与图集） */

@@ -12,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.stream.Collectors;
 
@@ -59,6 +60,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleMissingParam(MissingServletRequestParameterException ex) {
         String message = "缺少必填参数：" + ex.getParameterName();
         log.warn(message);
+        return badRequest(message);
+    }
+
+    /** 查询参数类型转换失败：返回参数错误，不落入系统异常兜底 */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String message = "参数 " + ex.getName() + " 格式不正确";
+        log.warn("参数类型转换失败：{}", message);
         return badRequest(message);
     }
 

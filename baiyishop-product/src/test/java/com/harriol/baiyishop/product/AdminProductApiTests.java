@@ -119,6 +119,12 @@ class AdminProductApiTests {
         assertThat(data.get("images").size()).isEqualTo(2);
         assertThat(data.get("skus").get(0).get("skuCode").asString()).isEqualTo(id + "-01");
         assertThat(data.get("skus").get(0).get("price").asLong()).isEqualTo(9900);
+
+        long skuId = data.get("skus").get(0).get("id").asLong();
+        JsonNode skuSnapshot = send("GET", "/api/v1/admin/products/skus/" + skuId, null, operatorToken)
+                .json().get("data");
+        assertThat(skuSnapshot.get("productId").asLong()).isEqualTo(id);
+        assertThat(skuSnapshot.get("productName").asString()).isEqualTo(data.get("name").asString());
     }
 
     @Test

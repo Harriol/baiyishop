@@ -28,7 +28,7 @@
 | --- | --- |
 | 分类 | `GET /admin/categories`（含隐藏）、`POST`、`PUT /{id}`、`DELETE /{id}`、`PUT /{id}/visible?visible=` |
 | 品牌 | `GET /admin/brands`（分页 + 关键词 + 启用状态）、`POST`、`PUT /{id}`、`DELETE /{id}`、`PUT /{id}/enabled?enabled=` |
-| 商品 | `GET /admin/products`（分页 + 关键词 + 分类 + 品牌 + 状态）、`GET /{id}`、`POST`、`PUT /{id}`、`PUT /{id}/on-sale`、`PUT /{id}/off-sale`、`DELETE /{id}`（逻辑删除） |
+| 商品 | `GET /admin/products`（分页 + 关键词 + 分类 + 品牌 + 状态）、`GET /{id}`、`GET /skus/{skuId}`、`POST`、`PUT /{id}`、`PUT /{id}/on-sale`、`PUT /{id}/off-sale`、`DELETE /{id}`（逻辑删除） |
 | 参数 | `/admin/params/templates`（增删改查）、`/admin/params/items`（增删改） |
 | 首页配置 | `/admin/home/banners`、`/notices`、`/navs`、`/floors`（各为 `GET` 查询 + `PUT` **整份保存**） |
 | 图片上传 | `POST /admin/uploads/images`（multipart：`file` + `scene`），返回 `{url, objectName, size, contentType}` |

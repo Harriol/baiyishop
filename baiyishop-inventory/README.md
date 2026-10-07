@@ -23,9 +23,10 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | / | 库存分页（可按 `skuId` / `productId` 筛选，或只看预警 `onlyAlert=true`） |
+| GET | / | 库存分页（可按 `skuId` / `productId` / `productIds` 筛选，或只看预警 `onlyAlert=true`） |
+| PUT | `/{skuId}/init?productId=&initialAvailable=` | 初始化库存记录；已存在时只补全商品 ID，不重置库存 |
 | PUT | `/{skuId}/adjust?productId=` | 调整库存：正数补货、负数减库；**每次调整写一条流水**（变更前后值 + 原因 + 操作人） |
-| GET | `/flows` | 库存流水分页（可按 SKU、类型筛选） |
+| GET | `/flows` | 库存流水分页（可按 SKU、多个商品 ID、类型筛选） |
 | GET | `/alerts?status=OPEN` | 库存预警列表 |
 | PUT | `/alerts/{id}/close` | 关闭预警 |
 

@@ -18,12 +18,12 @@
 <script>
 if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "product:write" })) {
   var editId = Number(qs("id", 0)) || 0;
+  var canWriteInventory = hasPerm("inventory:write");
   var categories = [];      // 扁平（含隐藏），用于三级级联
   var tree = [];
   var brands = [];
   var templates = [];
   var product = null;
-  var skuStock = null;
   var saving = false;
 
   function flatten(nodes, out) {
@@ -150,7 +150,11 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
       + "<td><input class=\"input\" id=\"f-spec\" value=\"" + esc(sku ? sku.specName : "默认规格") + "\" style=\"min-width:110px\"></td>"
       + "<td><code class=\"small muted\">" + (sku ? esc(sku.skuCode) : "保存后自动生成（商品 ID + 序号）") + "</code></td>"
       + "<td><input class=\"input\" id=\"f-price\" value=\"" + (sku ? Store.money(sku.price) : "") + "\" style=\"width:110px\" placeholder=\"59.00\"></td>"
-      + "<td><span class=\"small muted\" id=\"f-stock\">" + (sku ? "查询中…" : "创建后为 0，请在库存管理调整") + "</span></td>"
+      + "<td>" + (sku
+          ? "<span class=\"small muted\" id=\"f-stock\">查询中…</span>"
+          : (canWriteInventory
+              ? "<div class=\"inline\"><input class=\"input\" id=\"f-stock\" type=\"number\" min=\"0\" step=\"1\" value=\"0\" style=\"width:90px\"><span class=\"small faint\">初始库存</span></div>"
+              : "<span class=\"small muted\" id=\"f-stock\">0（无库存管理权限）</span>")) + "</td>"
       + "<td><input type=\"checkbox\" id=\"f-enabled\" " + (!sku || sku.enabled ? "checked" : "") + "></td>"
       + "</tr></tbody></table><div class=\"hint\">本期为单规格，保留 SKU 结构（每商品一个默认 SKU）</div></div></div>"
       + "<div class=\"form-section\">商品参数</div>"
@@ -194,14 +198,36 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     if (sku) {
       Api.get("/v1/admin/inventory?skuId=" + sku.id + "&page=1&size=1", { silent: true }).then(function (page) {
         var row = (page.list || [])[0];
-        skuStock = row || null;
-        document.getElementById("f-stock").innerHTML = row
-          ? "<a href=\"inventory.html?skuId=" + sku.id + "\">" + row.available + "（去调整）</a>"
-          : "未建库存记录";
+        if (row) {
+          document.getElementById("f-stock").innerHTML =
+            "<a href=\"inventory.html?skuId=" + sku.id + "\">" + row.available + "（去调整）</a>";
+          return;
+        }
+        if (!canWriteInventory) {
+          document.getElementById("f-stock").textContent = "未建库存记录";
+          return;
+        }
+        document.getElementById("f-stock").innerHTML =
+          "<div class=\"inline\"><input class=\"input\" id=\"f-init-stock\" type=\"number\" min=\"0\" step=\"1\" value=\"0\" style=\"width:90px\">"
+          + "<button class=\"btn btn-sm\" id=\"init-stock\" type=\"button\">初始化库存</button></div>";
+        document.getElementById("init-stock").onclick = function () {
+          var raw = document.getElementById("f-init-stock").value.trim();
+          if (!/^\d+$/.test(raw)) { toast("初始库存必须是非负整数", "err"); return; }
+          initializeInventory(sku.id, product.id, Number(raw)).then(function () {
+            toast("库存记录已初始化", "ok");
+            document.getElementById("f-stock").innerHTML =
+              "<a href=\"inventory.html?skuId=" + sku.id + "\">" + Number(raw) + "（去调整）</a>";
+          }, showError);
+        };
       }, function () {
         document.getElementById("f-stock").textContent = "—";
       });
     }
+  }
+
+  function initializeInventory(skuId, productId, initialAvailable) {
+    return Api.put("/v1/admin/inventory/" + skuId + "/init?productId=" + productId
+      + "&initialAvailable=" + initialAvailable, null);
   }
 
   function save() {
@@ -216,6 +242,12 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     if (childrenOf(categoryId).length) { toast("该分类下还有子分类，请选择最末级分类", "err"); return; }
     if (!mainImage) { toast("请填写主图地址", "err"); return; }
     if (!/^\d+(\.\d{1,2})?$/.test(priceYuan) || Number(priceYuan) <= 0) { toast("请填写正确的价格（元，最多两位小数）", "err"); return; }
+    var initialStock = 0;
+    if (!editId && canWriteInventory) {
+      var initialStockRaw = document.getElementById("f-stock").value.trim();
+      if (!/^\d+$/.test(initialStockRaw)) { toast("初始库存必须是非负整数", "err"); return; }
+      initialStock = Number(initialStockRaw);
+    }
 
     var params = [];
     document.querySelectorAll("[data-param]").forEach(function (input) {
@@ -248,12 +280,22 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     saving = true;
     [document.getElementById("save"), document.getElementById("save2")].forEach(function (b) { if (b) b.disabled = true; });
     var request = editId ? Api.put("/v1/admin/products/" + editId, body) : Api.post("/v1/admin/products", body);
-    request.then(function () {
+    var createdProduct = null;
+    request.then(function (saved) {
+      if (editId || !canWriteInventory || !saved || !saved.skus || !saved.skus.length) return saved;
+      createdProduct = saved;
+      return initializeInventory(saved.skus[0].id, saved.id, initialStock);
+    }).then(function () {
       toast("保存成功，商品索引同步任务已投递", "ok");
       setTimeout(function () { location.href = "products.html"; }, 700);
     }, function (error) {
       saving = false;
       [document.getElementById("save"), document.getElementById("save2")].forEach(function (b) { if (b) b.disabled = false; });
+      if (createdProduct) {
+        toast("商品已创建，但初始库存设置失败，请在编辑页重试", "err");
+        setTimeout(function () { location.href = "product-edit.html?id=" + createdProduct.id; }, 900);
+        return;
+      }
       showError(error);
     });
   }

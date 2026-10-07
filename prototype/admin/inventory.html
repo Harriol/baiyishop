@@ -20,9 +20,43 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
   var canWrite = hasPerm("inventory:write");
   var tab = "stock";
   var page = 1, SIZE = 10, total = 0;
-  var skuFilter = qs("skuId", "");
+  var filterValue = qs("skuId", "");
+  var resolvedProductIds = null;
+  var resolveSeq = 0;
   var onlyAlert = false;
   var productCache = {};   // productId -> 名称 / 主图；后端没有批量查询，按行懒加载
+  var skuCache = {};       // skuId -> SKU 快照（兼容历史 productId=0 的库存行）
+
+  function isSkuId(value) {
+    return /^[1-9]\d*$/.test(value);
+  }
+
+  function filterQuery() {
+    if (!filterValue) return "";
+    if (isSkuId(filterValue)) return "&skuId=" + encodeURIComponent(filterValue);
+    return "&productIds=" + (resolvedProductIds || [-1]).join(",");
+  }
+
+  /** 商品名先查商品 ID，再由 inventory-service 批量筛选 */
+  function resolveFilter(done) {
+    resolvedProductIds = null;
+    if (!filterValue || isSkuId(filterValue)) {
+      done();
+      return;
+    }
+    var seq = ++resolveSeq;
+    Api.get("/v1/admin/products?page=1&size=1000&keyword=" + encodeURIComponent(filterValue)).then(function (data) {
+      if (seq !== resolveSeq) return;
+      var ids = (data.list || []).map(function (p) { return p.id; }).filter(function (id) { return !!id; });
+      resolvedProductIds = ids.length ? ids : [-1];
+      done();
+    }, function (error) {
+      if (seq !== resolveSeq) return;
+      resolvedProductIds = [-1];
+      showError(error);
+      done();
+    });
+  }
 
   function productOf(id, done) {
     if (productCache[id]) { done(productCache[id]); return; }
@@ -32,7 +66,37 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
     }, function () { done(null); });
   }
 
+  function skuOf(id, done) {
+    if (skuCache[id]) { done(skuCache[id]); return; }
+    Api.get("/v1/admin/products/skus/" + id, { silent: true }).then(function (sku) {
+      skuCache[id] = sku;
+      done(sku);
+    }, function () { done(null); });
+  }
+
+  function repairInventoryProductId(skuId, productId) {
+    if (!canWrite || !productId) return;
+    Api.put("/v1/admin/inventory/" + skuId + "/init?productId=" + productId + "&initialAvailable=0",
+      null, { silent: true }).then(function () {}, function () {});
+  }
+
+  function renderProductCell(cell, id, name, image, hint) {
+    if (!id) { cell.textContent = hint || "未知商品"; return; }
+    cell.dataset.pid = id;
+    var row = cell.closest("tr");
+    var button = row && row.querySelector("[data-adj]");
+    if (button) button.dataset.pid = id;
+    cell.innerHTML = "<div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(image, "tee-01") + "\" alt=\"\">"
+      + "<span><a href=\"product-edit.html?id=" + id + "\">" + esc(name || ("商品 " + id)) + "</a>"
+      + (hint ? "<br><span class=\"small faint\">" + esc(hint) + "</span>" : "") + "</span></div>";
+    mountIcons(cell);
+  }
+
   function render() {
+    if (filterValue && !isSkuId(filterValue) && resolvedProductIds === null) {
+      resolveFilter(render);
+      return;
+    }
     var body = document.getElementById("body");
     document.getElementById("pager").innerHTML = "";
     if (tab === "stock") renderStock(body);
@@ -42,7 +106,7 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
 
   function renderStock(body) {
     var query = "page=" + page + "&size=" + SIZE;
-    if (skuFilter) query += "&skuId=" + encodeURIComponent(skuFilter);
+    query += filterQuery();
     if (onlyAlert) query += "&onlyAlert=true";
     Api.get("/v1/admin/inventory?" + query).then(function (data) {
       total = data.total || 0;
@@ -50,7 +114,7 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
       body.innerHTML = "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">SKU ID</th><th class=\"num\">可售</th><th class=\"num\">锁定</th><th class=\"num\">预警阈值</th><th>更新时间</th><th>操作</th></tr></thead><tbody>"
         + (list.length ? list.map(function (r) {
             var low = r.alerting || r.available <= r.warnThreshold;
-            return "<tr><td class=\"pname\" data-pid=\"" + (r.productId || "") + "\"><span class=\"small faint\">商品 " + (r.productId || "—") + "</span></td>"
+            return "<tr><td class=\"pname\" data-sku=\"" + r.skuId + "\" data-pid=\"" + (r.productId || "") + "\"><span class=\"small faint\">商品 " + (r.productId || "—") + "</span></td>"
               + "<td class=\"num small muted\">" + r.skuId + "</td>"
               + "<td class=\"num\"" + (low ? " style=\"color:var(--price);font-weight:600\"" : "") + ">" + r.available + "</td>"
               + "<td class=\"num\">" + r.locked + "</td><td class=\"num\">" + r.warnThreshold + "</td>"
@@ -70,19 +134,27 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
   function fillNames(body) {
     body.querySelectorAll(".pname").forEach(function (cell) {
       var id = Number(cell.dataset.pid);
-      if (!id) { cell.textContent = "—"; return; }
+      var skuId = Number(cell.dataset.sku);
+      if (!id && skuId) {
+        skuOf(skuId, function (sku) {
+          if (!sku) { cell.textContent = "未知 SKU " + skuId; return; }
+          repairInventoryProductId(skuId, sku.productId);
+          renderProductCell(cell, sku.productId, sku.productName, sku.productImage,
+            "SKU " + skuId + " · " + (sku.specName || "默认规格"));
+        });
+        return;
+      }
+      if (!id) { cell.textContent = skuId ? "未知 SKU " + skuId : "—"; return; }
       productOf(id, function (p) {
         if (!p) { cell.textContent = "商品 " + id; return; }
-        cell.innerHTML = "<div class=\"cell-main\"><img class=\"thumb\" src=\"" + img(p.mainImage, "tee-01") + "\" alt=\"\">"
-          + "<span><a href=\"product-edit.html?id=" + p.id + "\">" + esc(p.name) + "</a><br><span class=\"small faint\">" + esc(p.categoryName || "") + "</span></span></div>";
-        mountIcons(cell);
+        renderProductCell(cell, p.id, p.name, p.mainImage, p.categoryName || "");
       });
     });
   }
 
   function renderFlows(body) {
     var query = "page=" + page + "&size=" + SIZE;
-    if (skuFilter) query += "&skuId=" + encodeURIComponent(skuFilter);
+    query += filterQuery();
     Api.get("/v1/admin/inventory/flows?" + query).then(function (data) {
       total = data.total || 0;
       var list = data.list || [];
@@ -110,7 +182,7 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
       body.innerHTML = list.length
         ? "<div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>商品</th><th class=\"num\">SKU ID</th><th class=\"num\">当前库存</th><th class=\"num\">预警阈值</th><th>触发时间</th><th>状态</th><th>操作</th></tr></thead><tbody>"
           + list.map(function (a) {
-              return "<tr><td class=\"pname\" data-pid=\"" + (a.productId || "") + "\"><span class=\"small faint\">商品 " + (a.productId || "—") + "</span></td>"
+              return "<tr><td class=\"pname\" data-sku=\"" + a.skuId + "\" data-pid=\"" + (a.productId || "") + "\"><span class=\"small faint\">商品 " + (a.productId || "—") + "</span></td>"
                 + "<td class=\"num small muted\">" + a.skuId + "</td>"
                 + "<td class=\"num\" style=\"color:var(--price);font-weight:600\">" + a.currentStock + "</td>"
                 + "<td class=\"num\">" + a.threshold + "</td><td class=\"small muted\">" + formatTime(a.updatedAt) + "</td>"
@@ -178,7 +250,7 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
     + "<button data-v=\"stock\" class=\"on\">库存列表</button><button data-v=\"flow\">库存流水</button><button data-v=\"alert\">库存预警</button></div>"
     + "<span class=\"small faint\">库存权威在 inventory-service，秒杀池库存单独划拨</span></div>"
     + "<div class=\"panel-body\"><div class=\"toolbar\">"
-    + "<input class=\"input\" id=\"sku\" placeholder=\"按 SKU ID 精确筛选\" value=\"" + esc(skuFilter) + "\">"
+    + "<input class=\"input\" id=\"filter\" placeholder=\"按 SKU ID 或商品名称筛选\" value=\"" + esc(filterValue) + "\">"
     + "<button class=\"btn\" id=\"search\"><i data-icon=\"search\" data-size=\"15\"></i>查询</button>"
     + "<button class=\"btn btn-ghost\" id=\"reset\">重置</button>"
     + "<label class=\"check\"><input type=\"checkbox\" id=\"onlyAlert\" " + (onlyAlert ? "checked" : "") + "><span>只看预警</span></label>"
@@ -195,15 +267,20 @@ if (adminShell("inventory", { title: "库存管理", crumb: "商品", perm: "inv
     };
   });
   document.getElementById("search").onclick = function () {
-    skuFilter = document.getElementById("sku").value.trim();
+    filterValue = document.getElementById("filter").value.trim();
+    resolvedProductIds = null;
     page = 1;
     render();
   };
+  document.getElementById("filter").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") document.getElementById("search").click();
+  });
   document.getElementById("reset").onclick = function () {
-    skuFilter = "";
+    filterValue = "";
+    resolvedProductIds = null;
     onlyAlert = false;
     page = 1;
-    document.getElementById("sku").value = "";
+    document.getElementById("filter").value = "";
     document.getElementById("onlyAlert").checked = false;
     render();
   };

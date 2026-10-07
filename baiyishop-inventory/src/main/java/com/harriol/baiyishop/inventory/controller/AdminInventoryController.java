@@ -42,8 +42,19 @@ public class AdminInventoryController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) Long skuId,
             @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) List<Long> productIds,
             @RequestParam(required = false) Boolean onlyAlert) {
-        return Result.ok(inventoryService.page(page, size, skuId, productId, onlyAlert));
+        return Result.ok(inventoryService.page(page, size, skuId, productId, productIds, onlyAlert));
+    }
+
+    /** 初始化库存：商品创建时建档；已存在时仅补齐商品 ID，不重置库存 */
+    @PutMapping("/{skuId}/init")
+    public Result<InventoryItem> initialize(
+            @PathVariable Long skuId,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(defaultValue = "0") int initialAvailable) {
+        return Result.ok(inventoryService.initialize(skuId, productId, initialAvailable,
+                UserContext.requireAdminId()));
     }
 
     /** 调整库存：正数补货、负数减库；每次调整写一条流水（REQ-501） */
@@ -61,8 +72,9 @@ public class AdminInventoryController {
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) Long skuId,
+            @RequestParam(required = false) List<Long> productIds,
             @RequestParam(required = false) String type) {
-        return Result.ok(inventoryService.flows(page, size, skuId, type));
+        return Result.ok(inventoryService.flows(page, size, skuId, productIds, type));
     }
 
     /** 库存预警列表（REQ-505） */

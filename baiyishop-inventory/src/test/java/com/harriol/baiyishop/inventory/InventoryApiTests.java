@@ -16,6 +16,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -79,8 +81,12 @@ class InventoryApiTests {
 
     /** 建一条有货的 SKU（跳过预警阈值以下的干扰） */
     private long skuWithStock(int stock) throws Exception {
+        return skuWithStock(stock, 0L);
+    }
+
+    private long skuWithStock(int stock, long productId) throws Exception {
         long skuId = newSkuId();
-        Resp resp = send("PUT", "/api/v1/admin/inventory/" + skuId + "/adjust",
+        Resp resp = send("PUT", "/api/v1/admin/inventory/" + skuId + "/adjust?productId=" + productId,
                 "{\"delta\":" + stock + ",\"reason\":\"初始化测试库存\"}", operatorToken);
         assertThat(resp.json().get("code").asInt()).isZero();
         return skuId;
@@ -314,5 +320,60 @@ class InventoryApiTests {
                 .status()).isEqualTo(403);
         // 内部接口：网关负责挡外部流量，服务自身不要求令牌
         assertThat(send("GET", "/internal/inventory/skus/" + skuWithStock(3), null, null).status()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("库存列表与流水支持按多个商品筛选")
+    void filtersInventoryAndFlowsByProductIds() throws Exception {
+        long firstProductId = newSkuId();
+        long secondProductId = newSkuId();
+        long firstSkuId = skuWithStock(10, firstProductId);
+        long secondSkuId = skuWithStock(20, secondProductId);
+        String productIds = firstProductId + "," + secondProductId;
+
+        JsonNode inventory = send("GET", "/api/v1/admin/inventory?page=1&size=10&productIds=" + productIds,
+                null, operatorToken).json().get("data").get("list");
+        List<Long> actualProductIds = new ArrayList<>();
+        inventory.forEach(row -> actualProductIds.add(row.get("productId").asLong()));
+        assertThat(actualProductIds).containsExactlyInAnyOrder(firstProductId, secondProductId);
+
+        JsonNode flows = send("GET", "/api/v1/admin/inventory/flows?page=1&size=10&productIds=" + productIds,
+                null, operatorToken).json().get("data").get("list");
+        List<Long> actualSkuIds = new ArrayList<>();
+        flows.forEach(row -> actualSkuIds.add(row.get("skuId").asLong()));
+        assertThat(actualSkuIds).containsExactlyInAnyOrder(firstSkuId, secondSkuId);
+    }
+
+    @Test
+    @DisplayName("非法 SKU 查询参数返回参数错误而不是系统异常")
+    void invalidSkuFilterReturnsParameterError() throws Exception {
+        Resp response = send("GET", "/api/v1/admin/inventory?skuId=%E5%A5%B6%E9%BC%A0", null, operatorToken);
+
+        assertThat(response.status()).isEqualTo(400);
+        assertThat(response.json().get("code").asInt()).isEqualTo(10001);
+        assertThat(response.json().get("message").asString()).contains("skuId");
+    }
+
+    @Test
+    @DisplayName("库存初始化会建档、补全商品 ID，并保持幂等")
+    void initializeInventoryIsIdempotent() throws Exception {
+        long skuId = newSkuId();
+        long productId = newSkuId();
+
+        JsonNode initialized = send("PUT", "/api/v1/admin/inventory/" + skuId
+                + "/init?productId=" + productId + "&initialAvailable=12", null, operatorToken)
+                .json().get("data");
+        assertThat(initialized.get("productId").asLong()).isEqualTo(productId);
+        assertThat(initialized.get("available").asInt()).isEqualTo(12);
+
+        JsonNode repeated = send("PUT", "/api/v1/admin/inventory/" + skuId
+                + "/init?productId=" + productId + "&initialAvailable=99", null, operatorToken)
+                .json().get("data");
+        assertThat(repeated.get("available").asInt()).isEqualTo(12);
+
+        JsonNode flows = send("GET", "/api/v1/admin/inventory/flows?page=1&size=10&skuId=" + skuId,
+                null, operatorToken).json().get("data").get("list");
+        assertThat(flows.size()).isEqualTo(1);
+        assertThat(flows.get(0).get("reason").asString()).isEqualTo("新增商品初始库存");
     }
 }
