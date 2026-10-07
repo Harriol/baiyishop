@@ -161,9 +161,9 @@ Copy-Item .env.example .env                    # 按需改密码
 docker compose --env-file .env -f docker-compose.middleware.yml up -d
 cd ..
 
-# 5) 构建 + 起 8 个服务（一键脚本会等端口就绪）
-powershell -ExecutionPolicy Bypass -File scripts/smoke-all.ps1 -SkipBuild -SkipMiddleware -Only None -KeepRunning
-#   -Only None = 只起服务、不跑冒烟脚本（中间件已在跑，所以 -SkipMiddleware）
+# 5) 构建并起 8 个服务（一键脚本会等端口就绪；已有构建产物时加 -SkipBuild 可跳过构建）
+powershell -ExecutionPolicy Bypass -File scripts/smoke-all.ps1 -SkipMiddleware -Only None -KeepRunning
+#   -SkipMiddleware = 中间件已在跑；-Only None = 只起服务、不跑冒烟脚本
 #   也可以单模块跑： .\gradlew.bat :baiyishop-user:bootRun
 
 # 6) 前端
