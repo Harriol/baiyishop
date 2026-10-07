@@ -25,7 +25,8 @@ function hashCode(text) {
 window.img = function (name, fallback) {
   if (!name) return localImage("", fallback);
   if (/^https?:\/\//i.test(name)) {
-    if (/(^https?:\/\/minio[./]|localhost:9000|127\.0\.0\.1:9000|minio\.(local|test|example))/i.test(name)) {
+    // 只有明显的示例占位地址（https://minio/xxx）才回退；真实的 MinIO / CDN 地址原样使用
+    if (/^https?:\/\/minio[./]/i.test(name)) {
       return localImage(name, fallback);
     }
     return name;
@@ -33,6 +34,14 @@ window.img = function (name, fallback) {
   if (/\.(jpe?g|png|webp|gif|svg)$/i.test(name)) return imgPrefix() + name;
   return localImage(name, fallback);
 };
+
+/* 图片加载失败（对象存储没起或地址失效）时回退到本地占位图，页面不留裂图 */
+document.addEventListener("error", function (event) {
+  var el = event.target;
+  if (!el || el.tagName !== "IMG" || el.dataset.imgFallback === "1") return;
+  el.dataset.imgFallback = "1";
+  el.src = localImage(el.getAttribute("src") || "", "tee-01");
+}, true);
 
 /** HTML 转义：后端数据（商品名、备注等）拼进 innerHTML 前使用 */
 window.esc = function (value) {

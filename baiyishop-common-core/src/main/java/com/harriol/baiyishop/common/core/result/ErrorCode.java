@@ -15,6 +15,9 @@ public enum ErrorCode {
     NOT_FOUND(10004, "请求的资源不存在", 404),
     TOO_MANY_REQUESTS(10005, "操作过于频繁，请稍后再试", 429),
     SYSTEM_ERROR(10006, "系统繁忙，请稍后重试", 500),
+    FILE_TYPE_NOT_ALLOWED(10007, "只支持 JPG / PNG / WebP / GIF 图片", 400),
+    FILE_TOO_LARGE(10008, "图片大小不能超过 5MB", 400),
+    FILE_UPLOAD_FAILED(10009, "文件上传失败，请稍后重试", 500),
 
     // ---- 2xxxx 用户与账号 ----
     USER_CREDENTIALS_INVALID(20001, "账号或密码错误", 200),

@@ -34,6 +34,34 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
     return text;
   }
 
+  /** ISO 时间 → datetime-local 需要的 yyyy-MM-ddTHH:mm */
+  function toInputValue(value) {
+    var text = String(value || "").trim().replace(" ", "T");
+    return text.length >= 16 ? text.slice(0, 16) : text;
+  }
+
+  /** Date → datetime-local 值（本地时间，不能用 toISOString，那是 UTC） */
+  function localInput(date) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return date.getFullYear() + "-" + p(date.getMonth() + 1) + "-" + p(date.getDate())
+      + "T" + p(date.getHours()) + ":" + p(date.getMinutes());
+  }
+
+  /** 新建活动时给个合理默认值：下一个 5 分钟整点开始 */
+  function defaultStart() {
+    var date = new Date();
+    date.setSeconds(0, 0);
+    date.setMinutes(date.getMinutes() + (5 - date.getMinutes() % 5));
+    return localInput(date);
+  }
+
+  function plusHours(input, hours) {
+    var date = new Date(input);
+    if (isNaN(date.getTime())) return "";
+    date.setHours(date.getHours() + hours);
+    return localInput(date);
+  }
+
   function load() {
     Api.get("/v1/admin/seckill/activities?page=" + page + "&size=" + SIZE).then(function (data) {
       activities = data.list || [];
@@ -125,8 +153,8 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
   function editActivity(activity) {
     openModal("<div class=\"form-grid\">"
       + "<div class=\"field\"><label>活动名称</label><input class=\"input\" id=\"a-name\" value=\"" + esc(activity.name) + "\"></div>"
-      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" value=\"" + esc(String(activity.startTime || "").replace(" ", "T")) + "\" placeholder=\"2026-10-01T10:00:00\"></div>"
-      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" value=\"" + esc(String(activity.endTime || "").replace(" ", "T")) + "\" placeholder=\"2026-10-01T12:00:00\"></div></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" type=\"datetime-local\" id=\"a-start\" value=\"" + esc(toInputValue(activity.startTime)) + "\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" type=\"datetime-local\" id=\"a-end\" value=\"" + esc(toInputValue(activity.endTime)) + "\"></div></div>"
       + "<div class=\"alert alert-plain\"><i data-icon=\"info\" data-size=\"15\"></i>仅未开始的活动可修改，且只支持名称与起止时间；商品与库存需删除后重建。</div></div>",
       { title: "编辑秒杀活动", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
     document.getElementById("ok").onclick = function () {
@@ -155,6 +183,11 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
     }, function () { /* 商品拉取失败时保持空列表 */ });
   }
 
+  /** 秒杀价默认给原价的 6 折：后端要求必须低于原价，直接填原价会被拒 */
+  function defaultSeckillPrice(originFen) {
+    return Store.money(Math.max(100, Math.round(Number(originFen || 0) * 0.6)));
+  }
+
   function loadSkus() {
     var productId = Number(document.getElementById("a-product").value || 0);
     var select = document.getElementById("a-sku");
@@ -165,7 +198,7 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
         return "<option value=\"" + s.id + "\" data-price=\"" + s.price + "\">" + esc(s.specName || "默认规格") + " · " + Store.moneyPlain(s.price) + "</option>";
       }).join("") || "<option value=\"\">该商品没有 SKU</option>";
       var first = (p.skus || [])[0];
-      if (first) document.getElementById("a-price").value = Store.money(first.price);
+      if (first) document.getElementById("a-price").value = defaultSeckillPrice(first.price);
     }, function () { select.innerHTML = "<option value=\"\">SKU 加载失败</option>"; });
   }
 
@@ -173,12 +206,13 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
     openModal(
       "<div class=\"form-grid\">"
       + "<div class=\"field\"><label>活动名称</label><input class=\"input\" id=\"a-name\" placeholder=\"如：国庆秒杀\"></div>"
-      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" id=\"a-start\" placeholder=\"2026-10-01T10:00:00\"></div>"
-      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" id=\"a-end\" placeholder=\"2026-10-01T12:00:00\"></div></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>开始时间</label><input class=\"input\" type=\"datetime-local\" id=\"a-start\" value=\"" + defaultStart() + "\"></div>"
+      + "<div class=\"field\" style=\"flex:1\"><label>结束时间</label><input class=\"input\" type=\"datetime-local\" id=\"a-end\" value=\"" + plusHours(defaultStart(), 2) + "\"></div></div>"
       + "<div class=\"field\"><label>商品（在售）</label><input class=\"input\" id=\"a-kw\" placeholder=\"按名称搜索，留空取前 50 个\">"
       + "<select class=\"select mt8\" id=\"a-product\"></select></div>"
       + "<div class=\"field\"><label>SKU</label><select class=\"select\" id=\"a-sku\"><option value=\"\">请先选择商品</option></select></div>"
-      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>秒杀价（元）</label><input class=\"input\" id=\"a-price\" placeholder=\"59.00\"></div>"
+      + "<div class=\"inline\"><div class=\"field\" style=\"flex:1\"><label>秒杀价（元）</label><input class=\"input\" id=\"a-price\" placeholder=\"59.00\">"
+      + "<div class=\"hint\">需低于商品原价</div></div>"
       + "<div class=\"field\" style=\"flex:1\"><label>划拨库存</label><input class=\"input\" id=\"a-stock\" placeholder=\"100\"></div>"
       + "<div class=\"field\" style=\"flex:1\"><label>每人限购</label><input class=\"input\" id=\"a-limit\" value=\"1\"></div></div>"
       + "<div class=\"alert alert-plain\"><i data-icon=\"info\" data-size=\"15\"></i>划拨时普通库存立即扣减；超出可售库存会被拒绝（40005）；活动结束未售出自动回补。</div></div>",
@@ -186,9 +220,14 @@ if (adminShell("seckill", { title: "秒杀活动", crumb: "运营", perm: "secki
 
     loadProducts("");
     document.getElementById("a-product").onchange = loadSkus;
+    // 改开始时间时，若结束时间还早于它，自动顺延 2 小时，避免手滑报「时间不合法」
+    document.getElementById("a-start").addEventListener("change", function () {
+      var end = document.getElementById("a-end");
+      if (!end.value || end.value <= this.value) end.value = plusHours(this.value, 2);
+    });
     document.getElementById("a-sku").onchange = function () {
       var option = this.options[this.selectedIndex];
-      if (option && option.dataset.price) document.getElementById("a-price").value = Store.money(Number(option.dataset.price));
+      if (option && option.dataset.price) document.getElementById("a-price").value = defaultSeckillPrice(option.dataset.price);
     };
     document.getElementById("a-kw").addEventListener("keydown", function (ev) {
       if (ev.key === "Enter") loadProducts(this.value.trim());

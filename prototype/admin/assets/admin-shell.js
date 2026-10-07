@@ -170,3 +170,38 @@ function refreshProfile() {
     profile = fresh;
   }, function () { /* 令牌失效时 Api 层已处理跳登录 */ });
 }
+
+/**
+ * 绑定「本地上传图片」：把隐藏的 file 选择器挂到按钮上，上传成功后回调返回图片地址。
+ *
+ * @param button 触发按钮（DOM 元素）
+ * @param scene  业务场景，决定对象存储里的目录：product / banner
+ * @param onDone 成功回调 (url, data)
+ */
+window.bindImageUpload = function (button, scene, onDone) {
+  var picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = "image/png,image/jpeg,image/webp,image/gif";
+  picker.style.display = "none";
+  document.body.appendChild(picker);
+
+  picker.addEventListener("change", function () {
+    var file = picker.files && picker.files[0];
+    if (!file) return;
+    var label = button.innerHTML;
+    button.disabled = true;
+    button.textContent = "上传中…";
+    window.Api.uploadImage(file, scene).then(function (data) {
+      onDone(data.url, data);
+      window.toast("图片已上传", "ok");
+    }, function (error) {
+      window.showError(error);
+    }).then(function () {
+      button.disabled = false;
+      button.innerHTML = label;
+      picker.value = "";
+    });
+  });
+
+  button.addEventListener("click", function () { picker.click(); });
+};

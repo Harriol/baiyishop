@@ -2,9 +2,13 @@ package com.harriol.baiyishop.user.controller;
 
 import com.harriol.baiyishop.common.core.result.Result;
 import com.harriol.baiyishop.common.security.context.UserContext;
+import com.harriol.baiyishop.user.dto.UpdateProfileRequest;
 import com.harriol.baiyishop.user.dto.UserProfileResponse;
 import com.harriol.baiyishop.user.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,5 +29,11 @@ public class UserController {
     @GetMapping("/me")
     public Result<UserProfileResponse> me() {
         return Result.ok(authService.profile(UserContext.requireUserId()));
+    }
+
+    /** 修改当前用户资料：昵称 / 头像 / 手机号（REQ-104） */
+    @PutMapping("/me")
+    public Result<UserProfileResponse> updateMe(@Valid @RequestBody UpdateProfileRequest request) {
+        return Result.ok(authService.updateProfile(UserContext.requireUserId(), request));
     }
 }

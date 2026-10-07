@@ -27,7 +27,7 @@ spring:
             - id: product-service
               uri: lb://baiyishop-product
               predicates:
-                - Path=/api/v1/categories/**,/api/v1/brands/**,/api/v1/products/**,/api/v1/home/**,/api/v1/admin/categories/**,/api/v1/admin/brands/**,/api/v1/admin/products/**,/api/v1/admin/params/**,/api/v1/admin/home/**
+                - Path=/api/v1/categories/**,/api/v1/brands/**,/api/v1/products/**,/api/v1/home/**,/api/v1/admin/categories/**,/api/v1/admin/brands/**,/api/v1/admin/products/**,/api/v1/admin/params/**,/api/v1/admin/home/**,/api/v1/admin/uploads/**
             - id: search-service
               uri: lb://baiyishop-search
               predicates:

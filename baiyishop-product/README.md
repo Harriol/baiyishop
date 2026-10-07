@@ -31,6 +31,9 @@
 | 商品 | `GET /admin/products`（分页 + 关键词 + 分类 + 品牌 + 状态）、`GET /{id}`、`POST`、`PUT /{id}`、`PUT /{id}/on-sale`、`PUT /{id}/off-sale`、`DELETE /{id}`（逻辑删除） |
 | 参数 | `/admin/params/templates`（增删改查）、`/admin/params/items`（增删改） |
 | 首页配置 | `/admin/home/banners`、`/notices`、`/navs`、`/floors`（各为 `GET` 查询 + `PUT` **整份保存**） |
+| 图片上传 | `POST /admin/uploads/images`（multipart：`file` + `scene`），返回 `{url, objectName, size, contentType}` |
+
+> 商品列表按分类筛选是**含子分类**语义：选一级分类也能查到挂在叶子分类下的商品。
 
 ## 内部接口 `/internal/products`（不对外暴露）
 
@@ -57,6 +60,18 @@
 | `home_floor` / `home_floor_item` | 首页楼层配置与人工置顶商品 |
 | `mq_outbox` | 本地消息表（商品变更事件的可靠投递） |
 
+## 图片上传（MinIO）
+
+`POST /api/v1/admin/uploads/images`（`SUPER_ADMIN` / `OPERATOR`，multipart 表单）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `file` | 图片文件；只接受 JPG / PNG / WebP / GIF，≤5MB（否则 10007 / 10008） |
+| `scene` | 业务场景，决定桶内目录：`product`（默认，商品图）/ `banner`（首页轮播） |
+
+对象名按 `{scene}/{yyyyMMdd}/{uuid}.{ext}` 生成，避免同名覆盖；桶不存在时**自动创建并设置为匿名只读**
+（图片要被前台 `<img>` 直接加载）。上传失败统一返回 10009，凭据不匹配时会附带明确的排查提示。
+
 ## 关键业务规则
 
 - **分类**：最多 3 级；调整父级时自动重算自身与全部后代的 `path`、`level`；**有子分类或被商品引用时禁止删除**
@@ -81,8 +96,9 @@
 
 ## 测试
 
-8 个测试类 / 56 个用例：分类树与路径重算、删除约束、品牌引用约束、商品 CRUD 与叶子分类校验、参数模板匹配、
-首页配置保存与楼层取数、上下架与逻辑删除、索引文档内容与本地消息表投递。
+9 个测试类 / 61 个用例：分类树与路径重算、删除约束、品牌引用约束、商品 CRUD 与叶子分类校验、
+列表按分类含子分类筛选、参数模板匹配、首页配置保存与楼层取数、上下架与逻辑删除、
+图片上传（类型/空文件校验、角色校验、上传后地址可访问）、索引文档内容与本地消息表投递。
 
 ## 本地启动
 

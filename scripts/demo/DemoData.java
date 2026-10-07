@@ -468,22 +468,13 @@ public class DemoData {
         }
     }
 
-    /** 每个商品写「通用参数」+ 所属一级分类对应的模板参数值 */
+    /**
+     * 每个商品写**一个**参数模板的值。
+     * <p>后端校验一个商品的参数项必须来自同一个模板（PARAM_ITEM_TEMPLATE_MISMATCH），
+     * 所以这里按一级分类挑最合适的那套：数码→数码参数、服饰→服饰参数、家居→家居参数、其余→通用参数。
+     */
     static void seedParamValues(Connection c, long productId, String level1, int index, Map<String, Long> items) throws SQLException {
         List<String[]> values = new ArrayList<>();
-        values.add(new String[]{"通用参数/适用场景", switch (level1) {
-            case "数码电器" -> "日常通勤 / 居家";
-            case "服饰鞋包" -> "通勤 / 休闲";
-            case "家居生活" -> "居家生活";
-            case "食品饮料" -> "日常饮用 / 办公";
-            case "美妆个护" -> "日常护理";
-            case "母婴玩具" -> "家庭日常";
-            case "运动户外" -> "运动健身 / 户外";
-            default -> "日常阅读 / 学习";
-        }});
-        values.add(new String[]{"通用参数/产地", "浙江杭州"});
-        values.add(new String[]{"通用参数/保修期", index % 3 == 0 ? "24" : "12"});
-
         switch (level1) {
             case "数码电器" -> {
                 values.add(new String[]{"数码参数/连接方式", index % 2 == 0 ? "蓝牙 5.3 / USB-C" : "蓝牙 5.2"});
@@ -500,7 +491,17 @@ public class DemoData {
                 values.add(new String[]{"家居参数/规格", "常规款"});
                 values.add(new String[]{"家居参数/适用面积", String.valueOf(10 + index % 3 * 5)});
             }
-            default -> { /* 其它一级分类只带通用参数 */ }
+            default -> {
+                values.add(new String[]{"通用参数/适用场景", switch (level1) {
+                    case "食品饮料" -> "日常饮用 / 办公";
+                    case "美妆个护" -> "日常护理";
+                    case "母婴玩具" -> "家庭日常";
+                    case "运动户外" -> "运动健身 / 户外";
+                    default -> "日常阅读 / 学习";
+                }});
+                values.add(new String[]{"通用参数/产地", "浙江杭州"});
+                values.add(new String[]{"通用参数/保修期", index % 3 == 0 ? "24" : "12"});
+            }
         }
 
         int sort = 0;

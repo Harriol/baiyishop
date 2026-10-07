@@ -206,6 +206,25 @@ class AdminProductApiTests {
     }
 
     @Test
+    @DisplayName("列表按分类筛选时包含子分类的商品（选一级分类能查到叶子分类下的商品）")
+    void pageFilterIncludesDescendantCategories() throws Exception {
+        long root = send("POST", "/api/v1/admin/categories",
+                "{\"parentId\":0,\"name\":\"" + name("根") + "\"}", operatorToken).json().get("data").get("id").asLong();
+        long leaf = send("POST", "/api/v1/admin/categories",
+                "{\"parentId\":" + root + ",\"name\":\"" + name("叶") + "\"}", operatorToken).json().get("data").get("id").asLong();
+        long productId = createProduct(leaf, null, 6600, 1);
+
+        Resp byParent = send("GET", "/api/v1/admin/products?page=1&size=50&categoryId=" + root, null, operatorToken);
+        assertThat(byParent.json().get("code").asInt()).isZero();
+        assertThat(byParent.json().get("data").get("list").findValues("id"))
+                .anyMatch(node -> node.asLong() == productId);
+
+        // 精确到叶子分类同样能查到
+        Resp byLeaf = send("GET", "/api/v1/admin/products?page=1&size=50&categoryId=" + leaf, null, operatorToken);
+        assertThat(byLeaf.json().get("data").get("total").asLong()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("角色校验：客服 403、无令牌 401")
     void roleEnforcement() throws Exception {
         assertThat(send("GET", "/api/v1/admin/products", null, null).status()).isEqualTo(401);

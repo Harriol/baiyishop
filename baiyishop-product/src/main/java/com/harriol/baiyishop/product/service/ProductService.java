@@ -206,10 +206,12 @@ public class ProductService {
     /** 后台商品分页（关键词 / 分类 / 品牌 / 状态） */
     public PageResult<ProductAdminItem> page(long page, long size, String keyword,
                                              Long categoryId, Long brandId, String status) {
+        // 分类筛选按「含子分类」语义：后台选一级分类时也要能看到其下叶子分类里的商品
+        List<Long> categoryIds = categoryId == null ? null : categoryService.selfAndDescendantIds(categoryId);
         Page<Product> pager = new Page<>(page, size);
         Page<Product> result = productMapper.selectPage(pager, Wrappers.<Product>lambdaQuery()
                 .like(StringUtils.hasText(keyword), Product::getName, keyword)
-                .eq(categoryId != null, Product::getCategoryId, categoryId)
+                .in(categoryIds != null, Product::getCategoryId, categoryIds == null ? List.of() : categoryIds)
                 .eq(brandId != null, Product::getBrandId, brandId)
                 .eq(StringUtils.hasText(status), Product::getStatus, status)
                 .orderByDesc(Product::getId));

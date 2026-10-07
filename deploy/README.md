@@ -69,6 +69,25 @@ seata:
 
 部署到同一 bridge 网络（应用也容器化）时，把环境变量 `SEATA_REGISTRY_TYPE=nacos` 传给应用即可切回服务发现。
 
+## MinIO：应用侧凭据也走「环境变量优先」
+
+`baiyishop-product` 用 `deploy/generate-local-config.ps1` 生成的 `baiyishop.minio.*` 连接对象存储（图片上传），
+取值优先级与 docker compose 一致：**进程环境变量 > deploy/.env**。
+
+如果本机设了用户级 `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`，容器实际用的就是它，
+生成脚本也会跟着用它（并打印提示）—— 否则会出现「MinIO 能开，但上传报凭据无效」。
+
+```powershell
+# 看一眼当前生效的值
+echo $env:MINIO_ROOT_USER                                          # 会话内
+[Environment]::GetEnvironmentVariable('MINIO_ROOT_USER','User')    # 用户级
+```
+
+改完 .env 或环境变量后：重跑 `generate-local-config.ps1` 生成配置，并重启 product 服务；
+若容器还是用旧凭据启的，需要 `docker compose ... up -d --force-recreate minio`。
+
+图片桶（默认 `baiyishop`）由应用在**首次上传时自动创建并设为匿名只读**，不需要手工建桶。
+
 另外两点：
 
 - `deploy/seata/application.yml` 是**镜像自带配置的副本 + 我们的改动**。里面 `logging.file.path`、
@@ -128,7 +147,8 @@ Docker 具名卷默认属主是 root，而 RocketMQ 容器以 `rocketmq`（uid 3
 ## 已知事项
 
 - **ES 中文分词**：已改用官方 analysis-smartcn 并固化进自建镜像（`deploy/elasticsearch/`），无需手工装包。
-- **Seata 尚未纳入编排**：接入全局事务时再补 `seata-server`。
+- **Seata 已纳入编排**：`baiyishop-seata-server`（TC，8091 / 控制台 7091）；本地应用用 grouplist 直连，
+  容器化部署时把 `SEATA_REGISTRY_TYPE` 切成 `nacos`。
 - 首次启动会执行 `mysql/init/01-create-schemas-and-users.sh`；若需重新初始化，用 `down -v` 删除数据卷后再起。
 - 原生 MySQL 初始化已实测：6 个 schema 为 utf8mb4/utf8mb4_0900_ai_ci，每个账号只被授权自己的 schema，
   越权访问其他 schema 返回 1044/1142，且不影响库中已有的其他数据库。

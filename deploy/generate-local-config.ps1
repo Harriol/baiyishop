@@ -32,7 +32,7 @@ if ([string]::IsNullOrWhiteSpace($jwtUser) -or [string]::IsNullOrWhiteSpace($jwt
 $services = @(
     @{ name = "baiyishop-gateway";   db = "";                    user = "";               pwdKey = "" },
     @{ name = "baiyishop-user";      db = "baiyishop_user";      user = "baiyi_user";      pwdKey = "MYSQL_PWD_USER" },
-    @{ name = "baiyishop-product";   db = "baiyishop_product";   user = "baiyi_product";   pwdKey = "MYSQL_PWD_PRODUCT" },
+    @{ name = "baiyishop-product";   db = "baiyishop_product";   user = "baiyi_product";   pwdKey = "MYSQL_PWD_PRODUCT";   minio = $true },
     @{ name = "baiyishop-inventory"; db = "baiyishop_inventory"; user = "baiyi_inventory"; pwdKey = "MYSQL_PWD_INVENTORY" },
     @{ name = "baiyishop-order";     db = "baiyishop_order";     user = "baiyi_order";     pwdKey = "MYSQL_PWD_ORDER" },
     @{ name = "baiyishop-payment";   db = "baiyishop_payment";   user = "baiyi_payment";   pwdKey = "MYSQL_PWD_PAYMENT" },
@@ -66,6 +66,32 @@ foreach ($s in $services) {
     $out.Add("  jwt:")
     $out.Add("    user-secret: `"$jwtUser`"")
     $out.Add("    admin-secret: `"$jwtAdmin`"")
+
+    if ($s.minio) {
+        # 图片上传（REQ-203）：桶名固定 baiyishop（桶会自动创建并设为匿名只读）
+        # 取值优先级与 docker compose 一致：**进程环境变量 > deploy/.env**。
+        # 本机若设了用户级 MINIO_ROOT_USER/PASSWORD，容器会用它，这里必须跟着用，否则应用连不上。
+        $minioUser = $envMap["MINIO_ROOT_USER"]
+        $minioPwd = $envMap["MINIO_ROOT_PASSWORD"]
+        if (-not [string]::IsNullOrWhiteSpace($env:MINIO_ROOT_USER)) {
+            $minioUser = $env:MINIO_ROOT_USER
+            Write-Host "提示：检测到环境变量 MINIO_ROOT_USER，已覆盖 deploy/.env（compose 同此优先级）" -ForegroundColor Yellow
+        }
+        if (-not [string]::IsNullOrWhiteSpace($env:MINIO_ROOT_PASSWORD)) {
+            $minioPwd = $env:MINIO_ROOT_PASSWORD
+        }
+        if ([string]::IsNullOrWhiteSpace($minioUser) -or [string]::IsNullOrWhiteSpace($minioPwd)) {
+            throw "缺少 MINIO_ROOT_USER 或 MINIO_ROOT_PASSWORD（deploy/.env 或环境变量）"
+        }
+        $minioPort = if ($envMap["MINIO_API_PORT"]) { $envMap["MINIO_API_PORT"] } else { "9000" }
+        $out.Add("")
+        $out.Add("  # 对象存储：商品图 / 首页轮播图上传（REQ-203）")
+        $out.Add("  minio:")
+        $out.Add("    endpoint: http://localhost:$minioPort")
+        $out.Add("    access-key: `"$minioUser`"")
+        $out.Add("    secret-key: `"$minioPwd`"")
+        $out.Add("    bucket: baiyishop")
+    }
     $out.Add("")
 
     $content = $out -join [Environment]::NewLine

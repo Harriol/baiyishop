@@ -24,7 +24,7 @@
 | 路由 id | 路径前缀 | 目标服务 |
 | --- | --- | --- |
 | `user-service` | `/api/v1/auth/**`、`/api/v1/users/**`、`/api/v1/addresses/**`、`/api/v1/admin/auth/**`、`/api/v1/admin/admins/**`、`/api/v1/admin/roles/**`、`/api/v1/admin/permissions/**` | `baiyishop-user` |
-| `product-service` | `/api/v1/categories/**`、`/api/v1/brands/**`、`/api/v1/products/**`、`/api/v1/home/**`、`/api/v1/admin/categories/**`、`/api/v1/admin/brands/**`、`/api/v1/admin/products/**`、`/api/v1/admin/params/**`、`/api/v1/admin/home/**` | `baiyishop-product` |
+| `product-service` | `/api/v1/categories/**`、`/api/v1/brands/**`、`/api/v1/products/**`、`/api/v1/home/**`、`/api/v1/admin/categories/**`、`/api/v1/admin/brands/**`、`/api/v1/admin/products/**`、`/api/v1/admin/params/**`、`/api/v1/admin/home/**`、`/api/v1/admin/uploads/**` | `baiyishop-product` |
 | `search-service` | `/api/v1/search/**` | `baiyishop-search` |
 | `inventory-service` | `/api/v1/inventory/**`、`/api/v1/admin/inventory/**` | `baiyishop-inventory` |
 | `order-service` | `/api/v1/carts/**`、`/api/v1/orders/**`、`/api/v1/admin/orders/**` | `baiyishop-order` |

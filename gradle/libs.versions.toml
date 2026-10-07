@@ -16,6 +16,8 @@ jjwt = "0.12.7"
 elasticsearch-client = "8.11.3"
 # 覆盖率工具（NFR：核心模块 ≥80%）
 jacoco = "0.8.13"
+# 对象存储：商品图上传（REQ-203），与服务端 MinIO 同大版本
+minio = "8.5.17"
 
 [libraries]
 # --- Spring Cloud / Alibaba（BOM） ---
@@ -58,6 +60,9 @@ mybatis-plus-jsqlparser = { module = "com.baomidou:mybatis-plus-jsqlparser", ver
 # --- 分布式事务与消息 ---
 seata-spring-boot-starter = { module = "io.seata:seata-spring-boot-starter", version.ref = "seata" }
 rocketmq-spring-boot-starter = { module = "org.apache.rocketmq:rocketmq-spring-boot-starter", version.ref = "rocketmq-spring" }
+
+# --- 对象存储 ---
+minio = { module = "io.minio:minio", version.ref = "minio" }
 
 # --- 安全 ---
 spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }

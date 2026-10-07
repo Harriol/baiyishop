@@ -11,6 +11,7 @@ import com.harriol.baiyishop.user.cache.RedisTokenBlacklistChecker;
 import com.harriol.baiyishop.user.dto.LoginRequest;
 import com.harriol.baiyishop.user.dto.RegisterRequest;
 import com.harriol.baiyishop.user.dto.TokenResponse;
+import com.harriol.baiyishop.user.dto.UpdateProfileRequest;
 import com.harriol.baiyishop.user.dto.UserProfileResponse;
 import com.harriol.baiyishop.user.dto.WechatLoginRequest;
 import com.harriol.baiyishop.user.entity.User;
@@ -183,6 +184,43 @@ public class AuthService {
         if (user == null) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
+        return UserProfileResponse.from(user);
+    }
+
+    /**
+     * 修改个人资料（REQ-104）：只更新传入的字段，昵称与手机号都未传则视为无效请求。
+     * <p>账号（username）不可改，手机号为空串表示解绑。
+     */
+    @Transactional
+    public UserProfileResponse updateProfile(long userId, UpdateProfileRequest request) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
+        boolean changed = false;
+        if (request.nickname() != null) {
+            String nickname = request.nickname().trim();
+            if (nickname.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "昵称不能为空");
+            }
+            user.setNickname(nickname);
+            changed = true;
+        }
+        if (request.avatar() != null) {
+            String avatar = request.avatar().trim();
+            user.setAvatar(avatar.isEmpty() ? null : avatar);
+            changed = true;
+        }
+        if (request.phone() != null) {
+            String phone = request.phone().trim();
+            user.setPhone(phone.isEmpty() ? null : phone);
+            changed = true;
+        }
+        if (!changed) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "没有需要修改的内容");
+        }
+        userMapper.updateById(user);
+        log.info("用户资料已更新 userId={}", userId);
         return UserProfileResponse.from(user);
     }
 

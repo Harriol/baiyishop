@@ -34,7 +34,7 @@ powershell ... -File scripts/smoke-all.ps1 -SkipMiddleware     # 中间件已在
 
 ## 与单元/集成测试的分工
 
-- `gradlew test`：模块内测试（Mockito 替身 + 真实中间件），185 个用例（28 个测试类），覆盖业务规则与边界
+- `gradlew test`：模块内测试（Mockito 替身 + 真实中间件），199 个用例（31 个测试类），覆盖业务规则与边界
 - `scripts/smoke-all.ps1`：跨服务端到端，验证「真实链路 + 真实中间件」下的主路径与关键异常路径
 
 ## 性能压测（NFR-01）

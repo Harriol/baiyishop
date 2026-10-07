@@ -79,7 +79,29 @@ function load() {
 }
 
 document.getElementById("edit").onclick = function () {
-  toast("资料编辑不在本期接口范围，REQ-104 仅提供资料查询");
+  var current = window.Store.user() || {};
+  openModal(
+    "<div style=\"display:grid;gap:12px\">"
+    + "<div class=\"field\"><label>昵称</label><input class=\"input\" id=\"f-nick\" value=\"" + esc(current.nickname || "") + "\" maxlength=\"50\" placeholder=\"请输入昵称\"></div>"
+    + "<div class=\"field\"><label>手机号</label><input class=\"input\" id=\"f-phone\" value=\"\" placeholder=\"11 位手机号，留空表示解绑\">"
+    + "<div class=\"hint\">当前：" + esc(current.phone || "未绑定") + "；列表返回的是脱敏号码，需要重新输入完整手机号</div></div>"
+    + "<div class=\"field\"><label>账号</label><input class=\"input\" value=\"" + esc(current.username || "") + "\" disabled>"
+    + "<div class=\"hint\">登录账号不可修改</div></div></div>",
+    { title: "编辑资料", footer: "<button class=\"btn\" data-close>取消</button><button class=\"btn btn-primary\" id=\"ok\">保存</button>" });
+  document.getElementById("ok").onclick = function () {
+    var nickname = document.getElementById("f-nick").value.trim();
+    var phone = document.getElementById("f-phone").value.trim();
+    if (!nickname) { toast("请填写昵称", "err"); return; }
+    if (phone && !/^1[3-9]\d{9}$/.test(phone)) { toast("请填写完整正确的手机号", "err"); return; }
+    var body = { nickname: nickname };
+    // 手机号留空 = 解绑；没填过就不动
+    if (phone || (current.phone && phone === "")) body.phone = phone;
+    Api.put("/v1/users/me", body).then(function (profile) {
+      closeModal();
+      toast("资料已保存", "ok");
+      window.Store.refreshUser().then(load);
+    }, showError);
+  };
 };
 document.getElementById("logout").onclick = function () {
   Api.logout().then(function () {

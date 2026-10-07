@@ -53,6 +53,15 @@ baiyishop:
     outbox-max-retry: 10
     # 本地消息表扫描间隔（毫秒）
     outbox-poll-interval-ms: 2000
+  # 对象存储：商品图 / 首页轮播图上传（REQ-203、REQ-401）
+  # 凭据等敏感项由 application-local.yaml 提供（deploy/generate-local-config.ps1 生成）
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+    bucket: ${MINIO_BUCKET:baiyishop}
+    # 对外访问前缀；容器部署时可指向网关或域名，留空则用 endpoint
+    public-base-url: ${MINIO_PUBLIC_BASE_URL:}
 
 mybatis-plus:
   configuration:

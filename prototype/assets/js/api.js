@@ -65,6 +65,36 @@ window.Api = (function () {
     return "login.html?next=" + encodeURIComponent(page + location.search);
   }
 
+  /** 拆统一响应体：code=0 返回 data，否则抛业务异常 */
+  function unwrap(response, opts) {
+    return response.text().then(function (text) {
+      var payload = null;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch (e) {
+        payload = null;
+      }
+      if (!payload || typeof payload.code === "undefined") {
+        var transportError = new Error("服务暂时不可用（HTTP " + response.status + "），请稍后重试");
+        transportError.code = -1;
+        throw transportError;
+      }
+      if (payload.code === 0) {
+        return payload.data;
+      }
+      var error = new Error(payload.message || "操作失败，请稍后重试");
+      error.code = payload.code;
+      if (payload.code === 10002) {
+        // 令牌失效必须清会话；silent 只用来抑制跳转（例如首页静默刷新登录态）
+        clearSession();
+        if (!opts.silent && !/login\.html$/.test(location.pathname)) {
+          location.href = loginUrl();
+        }
+      }
+      throw error;
+    });
+  }
+
   function request(method, path, body, opts) {
     opts = opts || {};
     var headers = {};
@@ -81,33 +111,19 @@ window.Api = (function () {
       headers: headers,
       body: body === undefined || body === null ? undefined : JSON.stringify(body)
     }).then(function (response) {
-      return response.text().then(function (text) {
-        var payload = null;
-        try {
-          payload = text ? JSON.parse(text) : null;
-        } catch (e) {
-          payload = null;
-        }
-        if (!payload || typeof payload.code === "undefined") {
-          var transportError = new Error("服务暂时不可用（HTTP " + response.status + "），请稍后重试");
-          transportError.code = -1;
-          throw transportError;
-        }
-        if (payload.code === 0) {
-          return payload.data;
-        }
-        var error = new Error(payload.message || "操作失败，请稍后重试");
-        error.code = payload.code;
-        if (payload.code === 10002) {
-          // 令牌失效必须清会话；silent 只用来抑制跳转（例如首页静默刷新登录态）
-          clearSession();
-          if (!opts.silent && !/login\.html$/.test(location.pathname)) {
-            location.href = loginUrl();
-          }
-        }
-        throw error;
-      });
+      return unwrap(response, opts);
     });
+  }
+
+  /** multipart 上传：不能设 Content-Type，交给浏览器带 boundary */
+  function upload(path, file, scene) {
+    var form = new FormData();
+    form.append("file", file);
+    if (scene) form.append("scene", scene);
+    var headers = {};
+    if (token()) headers.Authorization = "Bearer " + token();
+    return fetch(BASE + path, { method: "POST", headers: headers, body: form })
+      .then(function (response) { return unwrap(response, {}); });
   }
 
   function get(path, opts) {
@@ -140,6 +156,10 @@ window.Api = (function () {
     post: post,
     put: put,
     del: del,
+    /** 上传图片到对象存储，返回 {url, objectName, size, contentType}；scene 取 product / banner */
+    uploadImage: function (file, scene) {
+      return upload("/v1/admin/uploads/images", file, scene);
+    },
 
     // ---------------- 领域方法 ----------------
     register: function (username, password, nickname) {

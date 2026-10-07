@@ -104,6 +104,18 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     }).join("");
   }
 
+  /** 编辑时自动选中该商品参数所属的模板（参数项只能来自一个模板，否则保存会丢参数） */
+  function pickTemplateFor(target) {
+    if (!target || !(target.params || []).length || !templates.length) return null;
+    var names = (target.params || []).map(function (p) { return p.name; });
+    var best = null, bestHit = 0;
+    templates.forEach(function (tpl) {
+      var hit = (tpl.items || []).filter(function (item) { return names.indexOf(item.name) >= 0; }).length;
+      if (hit > bestHit) { bestHit = hit; best = tpl; }
+    });
+    return best;
+  }
+
   function renderForm() {
     var chain1 = product ? catAt(product.categoryId, 1) : null;
     var sku = product && product.skus && product.skus.length ? product.skus[0] : null;
@@ -122,10 +134,17 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
       + "<option value=\"\">不指定品牌</option>"
       + brands.map(function (b) { return "<option value=\"" + b.id + "\"" + (product && product.brandId === b.id ? " selected" : "") + ">" + esc(b.name) + "</option>"; }).join("")
       + "</select></div></div>"
-      + "<div class=\"form-row\"><label>主图 URL</label><div><input class=\"input\" id=\"f-main\" value=\"" + esc(product ? product.mainImage : "") + "\" placeholder=\"https://minio/baiyishop/xxx.jpg\">"
-      + "<div class=\"hint\">当前未接入上传接口，直接填写图片地址；本地联调可用 assets/img 下的占位图名（如 headphone-01）</div></div></div>"
-      + "<div class=\"form-row\"><label>图集 URL</label><div><input class=\"input\" id=\"f-images\" value=\"" + esc(((product && product.images) || []).join(",")) + "\" placeholder=\"多个地址用英文逗号分隔\">"
-      + "<div class=\"hint\">首图与主图一致；正式实现为上传到 MinIO 返回 URL（REQ-203）</div></div></div>"
+      + "<div class=\"form-row\"><label>商品主图</label><div><div class=\"inline\">"
+      + "<img id=\"mainPreview\" src=\"" + img(product ? product.mainImage : "", "tee-01") + "\" alt=\"\" style=\"width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--line)\">"
+      + "<div class=\"grow\"><div class=\"inline\"><button class=\"btn btn-sm\" id=\"upMain\" type=\"button\"><i data-icon=\"plus\" data-size=\"14\"></i>本地上传</button>"
+      + "<span class=\"small faint\">JPG / PNG / WebP / GIF，≤5MB</span></div>"
+      + "<input class=\"input mt8\" id=\"f-main\" value=\"" + esc(product ? product.mainImage : "") + "\" placeholder=\"上传后自动填入，也可直接粘贴图片地址\">"
+      + "<div class=\"hint\">上传到 MinIO 后返回可访问 URL（REQ-203）</div></div></div></div></div>"
+      + "<div class=\"form-row\"><label>商品图集</label><div>"
+      + "<div class=\"inline\"><button class=\"btn btn-sm\" id=\"upGallery\" type=\"button\"><i data-icon=\"plus\" data-size=\"14\"></i>上传一张</button>"
+      + "<span class=\"small faint\">每上传一张就追加到下面的地址列表</span></div>"
+      + "<input class=\"input mt8\" id=\"f-images\" value=\"" + esc(((product && product.images) || []).join(",")) + "\" placeholder=\"多个地址用英文逗号分隔\">"
+      + "<div class=\"hint\">首图与主图一致；留空则前台只展示主图</div></div></div>"
       + "<div class=\"form-section\">SKU 与价格</div>"
       + "<div class=\"form-row\"><label>SKU</label><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>规格名</th><th>SKU 编码</th><th>价格（元）</th><th>库存</th><th>启用</th></tr></thead><tbody><tr>"
       + "<td><input class=\"input\" id=\"f-spec\" value=\"" + esc(sku ? sku.specName : "默认规格") + "\" style=\"min-width:110px\"></td>"
@@ -151,7 +170,22 @@ if (adminShell("products", { title: "商品编辑", crumb: "商品", perm: "prod
     document.getElementById("f-cat1").onchange = paintL2;
     document.getElementById("f-cat2").onchange = paintL3;
     document.getElementById("f-tpl").onchange = paintParams;
+    // 本地上传：主图直接覆盖，图集追加
+    bindImageUpload(document.getElementById("upMain"), "product", function (url) {
+      document.getElementById("f-main").value = url;
+      document.getElementById("mainPreview").src = url;
+      document.getElementById("mainPreview").dataset.imgFallback = "";
+    });
+    bindImageUpload(document.getElementById("upGallery"), "product", function (url) {
+      var input = document.getElementById("f-images");
+      input.value = input.value.trim() ? (input.value.replace(/[,\s]+$/, "") + "," + url) : url;
+    });
+    document.getElementById("f-main").addEventListener("change", function () {
+      document.getElementById("mainPreview").src = img(this.value.trim(), "tee-01");
+    });
     paintL2();
+    var matchedTemplate = pickTemplateFor(product);
+    if (matchedTemplate) document.getElementById("f-tpl").value = matchedTemplate.id;
     paintParams();
     document.getElementById("save").onclick = save;
     document.getElementById("save2").onclick = save;

@@ -20,6 +20,9 @@ dependencies {
     // 注册中心：服务在 Nacos 可见（REQ-1002）
     implementation(libs.nacos.discovery)
 
+    // 对象存储：商品图 / 首页轮播图上传到 MinIO 并返回可访问 URL（REQ-203、REQ-401）
+    implementation(libs.minio)
+
     implementation(libs.boot.actuator)
 
     // 数据库：驱动 + Flyway 迁移（docs/database.md 1.6）
